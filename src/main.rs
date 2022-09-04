@@ -1,3 +1,5 @@
+mod minecraft;
+
 use tokio::{io::AsyncReadExt, net::TcpListener};
 
 #[tokio::main]
