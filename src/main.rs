@@ -1,25 +1,13 @@
 mod minecraft;
 
-use tokio::{io::AsyncReadExt, net::TcpListener};
+use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = "127.0.0.1:7000";
-    let listener = TcpListener::bind(&addr).await?;
-    println!("Listening on: {}", addr);
-
-    loop {
-        let (mut socket, addr) = listener.accept().await?;
-        tokio::spawn(async move {
-            let mut buf = [0; 1024];
-            loop {
-                let n = socket.read(&mut buf).await.unwrap();
-                if n == 0 {
-                    return;
-                }
-                println!("Received {} bytes from {}", n, addr);
-                println!("Bytes: {}", String::from_utf8_lossy(&buf[..n]));
-            }
-        });
-    }
+    let path = std::env::args().nth(1).expect("Missing path to server jar");
+    let mut mc_server = minecraft::MinecraftServer::new(PathBuf::from(path));
+    let mut proc = mc_server.run()?;
+    let exit_status = proc.wait().await?;
+    println!("Server exited with status: {}", exit_status);
+    Ok(())
 }
