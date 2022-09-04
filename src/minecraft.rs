@@ -57,6 +57,9 @@ impl MinecraftServer {
                 Path::to_path_buf,
             ))
             .args(&proc_args[1..])
+            .stderr(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stdin(std::process::Stdio::piped())
             .spawn()?;
         //? TODO: pipe stdout and stderr to terminal
         Ok(child)
