@@ -38,7 +38,6 @@ impl MinecraftServer {
         println!("Checking Java version...");
         // TODO: load config and server.properties
         // TODO: patch Log4j
-        // TODO: use ok_or to propagate error
         let proc_args = vec![
             "java",
             "-Xms1G",
@@ -61,7 +60,6 @@ impl MinecraftServer {
             .stdout(std::process::Stdio::piped())
             .stdin(std::process::Stdio::piped())
             .spawn()?;
-        //? TODO: pipe stdout and stderr to terminal
         Ok(child)
     }
 }
