@@ -1,13 +1,10 @@
 use std::{
     io,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
 };
 
-use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt},
-    select,
-    task::JoinHandle,
-};
+use tokio::{io::AsyncWriteExt, select, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
 use crate::util::pipe_readable_to_stdout;
@@ -28,17 +25,19 @@ impl Default for MCServerState {
 }
 
 pub struct MinecraftServer {
-    state: MCServerState,
+    state: Arc<Mutex<MCServerState>>,
     jar_path: PathBuf,
     exit_handler: Option<JoinHandle<()>>,
+    server_stdin_sender: Option<Sender<String>>,
 }
 
 impl MinecraftServer {
     pub fn new(jar_path: PathBuf) -> Self {
         Self {
             jar_path,
-            state: MCServerState::Stopped,
+            state: Arc::new(Mutex::new(MCServerState::Stopped)),
             exit_handler: None,
+            server_stdin_sender: None,
         }
     }
 
@@ -58,7 +57,9 @@ impl MinecraftServer {
             "nogui",
         ];
         // TODO: set this to starting, use ready event to set to running
-        self.state = MCServerState::Running;
+        {
+            *self.state.lock().unwrap() = MCServerState::Running;
+        }
         let mut child = tokio::process::Command::new(proc_args[0])
             .current_dir(self.jar_path.parent().map_or_else(
                 || std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -94,21 +95,22 @@ impl MinecraftServer {
         let proc_stdin = child.stdin.take().unwrap();
         let stdin_token = CancellationToken::new();
         let cloned_token = stdin_token.clone();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(3);
+        self.server_stdin_sender = Some(tx);
         let stdin_handle = tokio::spawn(async move {
             // TODO: extract to a function, this looks confusing
             if let Err(err) = async {
-                let buf = &mut String::new();
-                let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
                 let mut proc_stdin = tokio::io::BufWriter::new(proc_stdin);
                 loop {
                     select! {
-                        n = stdin.read_line(buf) => {
-                            if n? == 0 {
-                                break;
+                        msg = rx.recv() => {
+                            if let Some(mut msg) = msg {
+                                if !msg.ends_with('\n') {
+                                    msg.push('\n');
+                                }
+                                proc_stdin.write_all(msg.as_bytes()).await?;
+                                proc_stdin.flush().await?;
                             }
-                            proc_stdin.write_all(buf.as_bytes()).await?;
-                            proc_stdin.flush().await?;
-                            buf.clear();
                         }
 
                         _ = cloned_token.cancelled() => {
@@ -125,12 +127,12 @@ impl MinecraftServer {
         });
         pipe_handles.push((stdin_token, stdin_handle));
 
+        let status_clone = self.state.clone();
         let exit_handler_handle = tokio::spawn(async move {
             match child.wait().await {
                 Ok(status) => println!("Server exited with status {}", status),
                 Err(err) => eprintln!("Error waiting for child process: {}", err),
             }
-            println!("Press enter to exit");
             // wait for all pipes to finish after cancelling them
             for result in
                 futures::future::join_all(pipe_handles.into_iter().map(|(token, handle)| {
@@ -143,6 +145,7 @@ impl MinecraftServer {
                     eprintln!("Error waiting for pipe: {}", err);
                 }
             }
+            *status_clone.lock().unwrap() = MCServerState::Stopped;
         });
         self.exit_handler = Some(exit_handler_handle);
 
@@ -154,5 +157,13 @@ impl MinecraftServer {
             handle.await?;
         }
         Ok(())
+    }
+
+    pub fn get_server_sender(&self) -> Option<Sender<String>> {
+        self.server_stdin_sender.clone()
+    }
+
+    pub fn status(&self) -> Arc<Mutex<MCServerState>> {
+        self.state.clone()
     }
 }
