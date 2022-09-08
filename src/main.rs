@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use tokio::io::AsyncBufReadExt;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> std::io::Result<()> {
     let path = std::env::args().nth(1).expect("Missing path to server jar");
     let mut mc_server = minecraft::MinecraftServer::new(dunce::canonicalize(PathBuf::from(path))?);
     let mut stdin_reader = tokio::io::BufReader::new(tokio::io::stdin());
@@ -14,17 +14,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("SSW Console v{}", cargo_version);
     // TODO: handle commands & errors properly without propagating them
     loop {
-        let mut buf = String::new();
-        stdin_reader.read_line(&mut buf).await?;
+        let mut buf = Vec::new();
+        stdin_reader.read_until(b'\n', &mut buf).await?;
+        let msg = String::from_utf8_lossy(&buf).into_owned();
         let status = *mc_server.status().lock().unwrap();
         if status == minecraft::MCServerState::Running {
             if let Some(sender) = mc_server.get_server_sender() {
-                sender.send(buf).await?;
+                if let Err(err) = sender.send(msg).await {
+                    eprintln!("Error sending message to server: {}", err);
+                }
             } else {
                 eprintln!("Server is running but no sender is available");
             }
         } else {
-            let command = buf.trim();
+            let command = msg.trim();
             match command {
                 "start" => {
                     if status == minecraft::MCServerState::Stopped {
@@ -36,7 +39,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "exit" => {
                     if status == minecraft::MCServerState::Running {
                         if let Some(sender) = mc_server.get_server_sender() {
-                            sender.send("stop\n".to_string()).await?;
+                            if let Err(err) = sender.send("stop\n".to_string()).await {
+                                eprintln!("Error sending message to server: {}", err);
+                            }
                         }
                         mc_server.wait_for_exit().await?;
                     }
