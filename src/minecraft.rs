@@ -5,7 +5,6 @@ use std::{
 
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt},
-    process::Child,
     select,
     task::JoinHandle,
 };
@@ -31,7 +30,7 @@ impl Default for MCServerState {
 pub struct MinecraftServer {
     state: MCServerState,
     jar_path: PathBuf,
-    pipe_handles: Vec<(CancellationToken, JoinHandle<()>)>,
+    exit_handler: Option<JoinHandle<()>>,
 }
 
 impl MinecraftServer {
@@ -39,11 +38,11 @@ impl MinecraftServer {
         Self {
             jar_path,
             state: MCServerState::Stopped,
-            pipe_handles: Vec::new(),
+            exit_handler: None,
         }
     }
 
-    pub fn run(&mut self) -> io::Result<Child> {
+    pub fn run(&mut self) -> io::Result<()> {
         // TODO: check java version
         println!("Checking Java version...");
         // TODO: load config and server.properties
@@ -79,7 +78,7 @@ impl MinecraftServer {
                 eprintln!("Error reading from stdout: {}", err);
             }
         });
-        self.pipe_handles.push((stdout_token, stdout_handle));
+        let mut pipe_handles = vec![(stdout_token, stdout_handle)];
 
         let stderr = child.stderr.take().unwrap();
         let stderr_token = CancellationToken::new();
@@ -89,7 +88,7 @@ impl MinecraftServer {
                 eprintln!("Error reading from stderr: {}", err);
             }
         });
-        self.pipe_handles.push((stderr_token, stderr_handle));
+        pipe_handles.push((stderr_token, stderr_handle));
 
         // pipe stdin to child stdin
         let proc_stdin = child.stdin.take().unwrap();
@@ -104,7 +103,7 @@ impl MinecraftServer {
                 loop {
                     select! {
                         n = stdin.read_line(buf) => {
-                            if n? == 0 || buf.trim() == "stop" {
+                            if n? == 0 {
                                 break;
                             }
                             proc_stdin.write_all(buf.as_bytes()).await?;
@@ -124,8 +123,36 @@ impl MinecraftServer {
                 eprintln!("Error reading from stdin: {}", err);
             }
         });
-        self.pipe_handles.push((stdin_token, stdin_handle));
+        pipe_handles.push((stdin_token, stdin_handle));
 
-        Ok(child)
+        let exit_handler_handle = tokio::spawn(async move {
+            match child.wait().await {
+                Ok(status) => println!("Server exited with status {}", status),
+                Err(err) => eprintln!("Error waiting for child process: {}", err),
+            }
+            println!("Press enter to exit");
+            // wait for all pipes to finish after cancelling them
+            for result in
+                futures::future::join_all(pipe_handles.into_iter().map(|(token, handle)| {
+                    token.cancel();
+                    handle
+                }))
+                .await
+            {
+                if let Err(err) = result {
+                    eprintln!("Error waiting for pipe: {}", err);
+                }
+            }
+        });
+        self.exit_handler = Some(exit_handler_handle);
+
+        Ok(())
+    }
+
+    pub async fn wait_for_exit(&mut self) -> io::Result<()> {
+        if let Some(handle) = self.exit_handler.take() {
+            handle.await?;
+        }
+        Ok(())
     }
 }
