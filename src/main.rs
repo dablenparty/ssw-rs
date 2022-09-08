@@ -1,4 +1,5 @@
 mod minecraft;
+mod util;
 
 use std::{io::Write, path::PathBuf};
 
