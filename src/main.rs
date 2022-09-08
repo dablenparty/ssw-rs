@@ -7,7 +7,7 @@ use std::path::PathBuf;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::args().nth(1).expect("Missing path to server jar");
     let mut mc_server = minecraft::MinecraftServer::new(dunce::canonicalize(PathBuf::from(path))?);
-    let mut proc = mc_server.run()?;
+    mc_server.run()?;
     match tokio::signal::ctrl_c().await {
         Ok(_) => {
             // not sure if using ? here is a good idea... but hey, this is just an example
@@ -18,7 +18,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Error: {}", e);
         }
     }
-    let exit_status = proc.wait().await?;
-    println!("Server exited with status: {}", exit_status);
+    mc_server.wait_for_exit().await?;
     Ok(())
 }
