@@ -6,8 +6,10 @@ use std::{
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt},
     process::Child,
+    select,
     task::JoinHandle,
 };
+use tokio_util::sync::CancellationToken;
 
 use crate::util::pipe_readable_to_stdout;
 
@@ -29,7 +31,7 @@ impl Default for MCServerState {
 pub struct MinecraftServer {
     state: MCServerState,
     jar_path: PathBuf,
-    pipe_handles: Vec<JoinHandle<()>>,
+    pipe_handles: Vec<(CancellationToken, JoinHandle<()>)>,
 }
 
 impl MinecraftServer {
@@ -70,23 +72,29 @@ impl MinecraftServer {
             .spawn()?;
         // pipe stdout and stderr to stdout
         let stdout = child.stdout.take().unwrap();
+        let stdout_token = CancellationToken::new();
+        let cloned_token = stdout_token.clone();
         let stdout_handle = tokio::spawn(async move {
-            if let Err(err) = pipe_readable_to_stdout(stdout).await {
+            if let Err(err) = pipe_readable_to_stdout(stdout, cloned_token).await {
                 eprintln!("Error reading from stdout: {}", err);
             }
         });
-        self.pipe_handles.push(stdout_handle);
+        self.pipe_handles.push((stdout_token, stdout_handle));
 
         let stderr = child.stderr.take().unwrap();
+        let stderr_token = CancellationToken::new();
+        let cloned_token = stderr_token.clone();
         let stderr_handle = tokio::spawn(async move {
-            if let Err(err) = pipe_readable_to_stdout(stderr).await {
+            if let Err(err) = pipe_readable_to_stdout(stderr, cloned_token).await {
                 eprintln!("Error reading from stderr: {}", err);
             }
         });
-        self.pipe_handles.push(stderr_handle);
+        self.pipe_handles.push((stderr_token, stderr_handle));
 
         // pipe stdin to child stdin
         let proc_stdin = child.stdin.take().unwrap();
+        let stdin_token = CancellationToken::new();
+        let cloned_token = stdin_token.clone();
         let stdin_handle = tokio::spawn(async move {
             // TODO: extract to a function, this looks confusing
             if let Err(err) = async {
@@ -94,13 +102,20 @@ impl MinecraftServer {
                 let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
                 let mut proc_stdin = tokio::io::BufWriter::new(proc_stdin);
                 loop {
-                    let n = stdin.read_line(buf).await?;
-                    if n == 0 || buf.trim() == "stop" {
-                        break;
+                    select! {
+                        n = stdin.read_line(buf) => {
+                            if n? == 0 || buf.trim() == "stop" {
+                                break;
+                            }
+                            proc_stdin.write_all(buf.as_bytes()).await?;
+                            proc_stdin.flush().await?;
+                            buf.clear();
+                        }
+
+                        _ = cloned_token.cancelled() => {
+                            break;
+                        }
                     }
-                    proc_stdin.write_all(buf.as_bytes()).await?;
-                    proc_stdin.flush().await?;
-                    buf.clear();
                 }
                 Ok::<(), io::Error>(())
             }
@@ -109,7 +124,7 @@ impl MinecraftServer {
                 eprintln!("Error reading from stdin: {}", err);
             }
         });
-        self.pipe_handles.push(stdin_handle);
+        self.pipe_handles.push((stdin_token, stdin_handle));
 
         Ok(child)
     }
