@@ -3,7 +3,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use tokio::process::Child;
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt},
+    process::Child,
+    task::JoinHandle,
+};
+
+use crate::util::pipe_readable_to_stdout;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -23,6 +29,7 @@ impl Default for MCServerState {
 pub struct MinecraftServer {
     state: MCServerState,
     jar_path: PathBuf,
+    pipe_handles: Vec<JoinHandle<()>>,
 }
 
 impl MinecraftServer {
@@ -30,6 +37,7 @@ impl MinecraftServer {
         Self {
             jar_path,
             state: MCServerState::Stopped,
+            pipe_handles: Vec::new(),
         }
     }
 
@@ -50,7 +58,7 @@ impl MinecraftServer {
         ];
         // TODO: set this to starting, use ready event to set to running
         self.state = MCServerState::Running;
-        let child = tokio::process::Command::new(proc_args[0])
+        let mut child = tokio::process::Command::new(proc_args[0])
             .current_dir(self.jar_path.parent().map_or_else(
                 || std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
                 Path::to_path_buf,
@@ -60,6 +68,49 @@ impl MinecraftServer {
             .stdout(std::process::Stdio::piped())
             .stdin(std::process::Stdio::piped())
             .spawn()?;
+        // pipe stdout and stderr to stdout
+        let stdout = child.stdout.take().unwrap();
+        let stdout_handle = tokio::spawn(async move {
+            if let Err(err) = pipe_readable_to_stdout(stdout).await {
+                eprintln!("Error reading from stdout: {}", err);
+            }
+        });
+        self.pipe_handles.push(stdout_handle);
+
+        let stderr = child.stderr.take().unwrap();
+        let stderr_handle = tokio::spawn(async move {
+            if let Err(err) = pipe_readable_to_stdout(stderr).await {
+                eprintln!("Error reading from stderr: {}", err);
+            }
+        });
+        self.pipe_handles.push(stderr_handle);
+
+        // pipe stdin to child stdin
+        let proc_stdin = child.stdin.take().unwrap();
+        let stdin_handle = tokio::spawn(async move {
+            // TODO: extract to a function, this looks confusing
+            if let Err(err) = async {
+                let buf = &mut String::new();
+                let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
+                let mut proc_stdin = tokio::io::BufWriter::new(proc_stdin);
+                loop {
+                    let n = stdin.read_line(buf).await?;
+                    if n == 0 || buf.trim() == "stop" {
+                        break;
+                    }
+                    proc_stdin.write_all(buf.as_bytes()).await?;
+                    proc_stdin.flush().await?;
+                    buf.clear();
+                }
+                Ok::<(), io::Error>(())
+            }
+            .await
+            {
+                eprintln!("Error reading from stdin: {}", err);
+            }
+        });
+        self.pipe_handles.push(stdin_handle);
+
         Ok(child)
     }
 }
