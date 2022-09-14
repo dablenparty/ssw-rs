@@ -1,0 +1,22 @@
+name: Build Rust with Cargo
+
+on:
+  push:
+    paths-ignore:
+      - "LICENSE"
+      - "README.md"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build with Cargo
+        run: cargo build --verbose
