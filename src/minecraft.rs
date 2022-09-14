@@ -1,10 +1,16 @@
 use std::{
-    io,
+    io::{self, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
-use tokio::{io::AsyncWriteExt, select, sync::mpsc::Sender, task::JoinHandle};
+use regex::Regex;
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt},
+    select,
+    sync::mpsc::Sender,
+    task::JoinHandle,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::util::pipe_readable_to_stdout;
@@ -58,7 +64,7 @@ impl MinecraftServer {
         ];
         // TODO: set this to starting, use ready event to set to running
         {
-            *self.state.lock().unwrap() = MCServerState::Running;
+            *self.state.lock().unwrap() = MCServerState::Starting;
         }
         let mut child = tokio::process::Command::new(proc_args[0])
             .current_dir(self.jar_path.parent().map_or_else(
@@ -74,8 +80,46 @@ impl MinecraftServer {
         let stdout = child.stdout.take().unwrap();
         let stdout_token = CancellationToken::new();
         let cloned_token = stdout_token.clone();
+        let cloned_state = self.state.clone();
+        let ready_line_regex = Regex::new(r#"^(\[.+\]:?)+ Done (\(\d+\.\d+s\))?!"#).unwrap();
+        let stopping_server_line_regex = Regex::new(r#"^(\[.+\]:?)+ Stopping the server"#).unwrap();
         let stdout_handle = tokio::spawn(async move {
-            if let Err(err) = pipe_readable_to_stdout(stdout, cloned_token).await {
+            if let Err(err) = async {
+                let cancellation_token = cloned_token;
+                let buf = &mut String::new();
+                let mut reader = tokio::io::BufReader::new(stdout);
+                loop {
+                    select! {
+                        n = reader.read_line(buf) => {
+                            if n? == 0 {
+                                break;
+                            }
+                            print!("{}", buf);
+                            std::io::stdout().flush()?;
+                            let mut current_state_lock = cloned_state.lock().unwrap();
+                            match *current_state_lock {
+                                MCServerState::Stopped => eprintln!("Reading IO after server stopped"),
+                                MCServerState::Starting => {
+                                    if ready_line_regex.is_match(buf) {
+                                        *current_state_lock = MCServerState::Running;
+                                    }
+                                },
+                                MCServerState::Running => {
+                                    if stopping_server_line_regex.is_match(buf) {
+                                        *current_state_lock = MCServerState::Stopping;
+                                    }
+                                },
+                                MCServerState::Stopping => {},
+                            }
+                            buf.clear();
+                        }
+                        _ = cancellation_token.cancelled() => {
+                            break;
+                        }
+                    }
+                }
+                Ok::<(), io::Error>(())
+            }.await {
                 eprintln!("Error reading from stdout: {}", err);
             }
         });
