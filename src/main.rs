@@ -46,7 +46,7 @@ async fn main() -> std::io::Result<()> {
             match command {
                 "start" => {
                     if status == minecraft::MCServerState::Stopped {
-                        mc_server.run()?;
+                        mc_server.run().await?;
                     } else {
                         error!("Server is already running");
                     }
@@ -120,14 +120,19 @@ fn init_logger() -> Result<(), Box<dyn std::error::Error>> {
     let log_path = zip_logs()?;
     let log_file = std::fs::File::create(log_path)?;
     // TODO: command line arg to set log level
+    let level_filter = if cfg!(debug_assertions) {
+        LevelFilter::Debug
+    } else {
+        LevelFilter::Info
+    };
     CombinedLogger::init(vec![
         TermLogger::new(
-            simplelog::LevelFilter::Info,
+            level_filter,
             config.clone(),
             TerminalMode::Mixed,
             ColorChoice::Auto,
         ),
-        WriteLogger::new(LevelFilter::Info, config, log_file),
+        WriteLogger::new(level_filter, config, log_file),
     ])?;
     Ok(())
 }
