@@ -4,6 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use log::{error, info};
 use regex::Regex;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt},
@@ -49,7 +50,7 @@ impl MinecraftServer {
 
     pub fn run(&mut self) -> io::Result<()> {
         // TODO: check java version
-        println!("Checking Java version...");
+        info!("Checking Java version...");
         // TODO: load config and server.properties
         // TODO: patch Log4j
         let proc_args = vec![
@@ -83,8 +84,9 @@ impl MinecraftServer {
         let cloned_state = self.state.clone();
         let ready_line_regex = Regex::new(r#"^(\[.+\]:?)+ Done (\(\d+\.\d+s\))?!"#).unwrap();
         let stopping_server_line_regex = Regex::new(r#"^(\[.+\]:?)+ Stopping the server"#).unwrap();
-        let stdout_handle = tokio::spawn(async move {
-            if let Err(err) = async {
+        let stdout_handle =
+            tokio::spawn(async move {
+                if let Err(err) = async {
                 let cancellation_token = cloned_token;
                 let buf = &mut String::new();
                 let mut reader = tokio::io::BufReader::new(stdout);
@@ -98,7 +100,7 @@ impl MinecraftServer {
                             std::io::stdout().flush()?;
                             let mut current_state_lock = cloned_state.lock().unwrap();
                             match *current_state_lock {
-                                MCServerState::Stopped => eprintln!("Reading IO after server stopped"),
+                                MCServerState::Stopped => error!("Reading IO after server stopped"),
                                 MCServerState::Starting => {
                                     if ready_line_regex.is_match(buf) {
                                         *current_state_lock = MCServerState::Running;
@@ -120,9 +122,9 @@ impl MinecraftServer {
                 }
                 Ok::<(), io::Error>(())
             }.await {
-                eprintln!("Error reading from stdout: {}", err);
+                error!("Error reading from stdout: {}", err);
             }
-        });
+            });
         let mut pipe_handles = vec![(stdout_token, stdout_handle)];
 
         let stderr = child.stderr.take().unwrap();
@@ -130,7 +132,7 @@ impl MinecraftServer {
         let cloned_token = stderr_token.clone();
         let stderr_handle = tokio::spawn(async move {
             if let Err(err) = pipe_readable_to_stdout(stderr, cloned_token).await {
-                eprintln!("Error reading from stderr: {}", err);
+                error!("Error reading from stderr: {}", err);
             }
         });
         pipe_handles.push((stderr_token, stderr_handle));
@@ -166,7 +168,7 @@ impl MinecraftServer {
             }
             .await
             {
-                eprintln!("Error reading from stdin: {}", err);
+                error!("Error reading from stdin: {}", err);
             }
         });
         pipe_handles.push((stdin_token, stdin_handle));
@@ -174,8 +176,8 @@ impl MinecraftServer {
         let status_clone = self.state.clone();
         let exit_handler_handle = tokio::spawn(async move {
             match child.wait().await {
-                Ok(status) => println!("Server exited with status {}", status),
-                Err(err) => eprintln!("Error waiting for child process: {}", err),
+                Ok(status) => info!("Server exited with status {}", status),
+                Err(err) => error!("Error waiting for child process: {}", err),
             }
             // wait for all pipes to finish after cancelling them
             for result in
@@ -186,7 +188,7 @@ impl MinecraftServer {
                 .await
             {
                 if let Err(err) = result {
-                    eprintln!("Error waiting for pipe: {}", err);
+                    error!("Error waiting for pipe: {}", err);
                 }
             }
             *status_clone.lock().unwrap() = MCServerState::Stopped;

@@ -19,7 +19,7 @@ use util::{create_dir_if_not_exists, get_exe_parent_dir};
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     if let Err(e) = init_logger() {
-        eprintln!("failed to initialize logger: {:?}", e);
+        error!("failed to initialize logger: {:?}", e);
         std::process::exit(1);
     }
     let path = std::env::args().nth(1).expect("Missing path to server jar");
@@ -36,10 +36,10 @@ async fn main() -> std::io::Result<()> {
         if status == minecraft::MCServerState::Running {
             if let Some(sender) = mc_server.get_server_sender() {
                 if let Err(err) = sender.send(msg).await {
-                    eprintln!("Error sending message to server: {}", err);
+                    error!("Error sending message to server: {}", err);
                 }
             } else {
-                eprintln!("Server is running but no sender is available");
+                error!("Server is running but no sender is available");
             }
         } else {
             let command = msg.trim();
@@ -48,14 +48,14 @@ async fn main() -> std::io::Result<()> {
                     if status == minecraft::MCServerState::Stopped {
                         mc_server.run()?;
                     } else {
-                        eprintln!("Server is already running");
+                        error!("Server is already running");
                     }
                 }
                 "exit" => {
                     if status == minecraft::MCServerState::Running {
                         if let Some(sender) = mc_server.get_server_sender() {
                             if let Err(err) = sender.send("stop\n".to_string()).await {
-                                eprintln!("Error sending message to server: {}", err);
+                                error!("Error sending message to server: {}", err);
                             }
                         }
                         mc_server.wait_for_exit().await?;
@@ -69,7 +69,7 @@ async fn main() -> std::io::Result<()> {
                     println!("    help - show this help message");
                 }
                 _ => {
-                    eprintln!("Unknown command: {}", command);
+                    error!("Unknown command: {}", command);
                 }
             }
         }
