@@ -108,7 +108,7 @@ pub fn get_exe_parent_dir() -> PathBuf {
         .to_path_buf()
 }
 
-/// Asynchronously creates a directory if it does not exist, failing if some other error occurs
+/// Synchronously creates a directory if it does not exist, failing if some other error occurs
 ///
 /// # Arguments
 ///
@@ -117,6 +117,26 @@ pub fn get_exe_parent_dir() -> PathBuf {
 /// returns: ()
 pub fn create_dir_if_not_exists(dir_path: &Path) -> io::Result<()> {
     if let Err(e) = create_dir_all(dir_path) {
+        if e.kind() == io::ErrorKind::AlreadyExists {
+            debug!("directory {} already exists, skipping", dir_path.display());
+            Ok(())
+        } else {
+            Err(e)
+        }
+    } else {
+        Ok(())
+    }
+}
+
+/// Asynchronously creates a directory if it does not exist, failing if some other error occurs
+///
+/// # Arguments
+///
+/// * `file_path`: the path to the directory
+///
+/// returns: ()
+pub async fn async_create_dir_if_not_exists(dir_path: &Path) -> io::Result<()> {
+    if let Err(e) = tokio::fs::create_dir_all(dir_path).await {
         if e.kind() == io::ErrorKind::AlreadyExists {
             debug!("directory {} already exists, skipping", dir_path.display());
             Ok(())
