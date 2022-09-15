@@ -8,7 +8,7 @@ use std::{
 
 use chrono::{DateTime, Local};
 use flate2::{Compression, GzBuilder};
-use log::{debug, error, info, warn, LevelFilter};
+use log::{error, LevelFilter};
 use simplelog::{
     format_description, ColorChoice, CombinedLogger, TermLogger, TerminalMode, ThreadLogMode,
     WriteLogger,
@@ -22,10 +22,6 @@ async fn main() -> std::io::Result<()> {
         eprintln!("failed to initialize logger: {:?}", e);
         std::process::exit(1);
     }
-    debug!("DEBUG");
-    info!("INFO");
-    warn!("WARN");
-    error!("ERROR");
     let path = std::env::args().nth(1).expect("Missing path to server jar");
     let mut mc_server = minecraft::MinecraftServer::new(dunce::canonicalize(PathBuf::from(path))?);
     let mut stdin_reader = tokio::io::BufReader::new(tokio::io::stdin());
