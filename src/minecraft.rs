@@ -31,6 +31,30 @@ impl Default for MCServerState {
     }
 }
 
+pub struct SswConfig {
+    memory_in_gb: f32,
+    restart_timeout: f32,
+    shutdown_timeout: f32,
+    ssw_port: u32,
+    mc_version: Option<String>,
+    required_java_version: String,
+    extra_args: Vec<String>,
+}
+
+impl Default for SswConfig {
+    fn default() -> Self {
+        Self {
+            memory_in_gb: 1.0,
+            restart_timeout: 12.0,
+            shutdown_timeout: 5.0,
+            ssw_port: 25565,
+            mc_version: None,
+            required_java_version: "17.0".to_string(),
+            extra_args: Vec::new(),
+        }
+    }
+}
+
 pub struct MinecraftServer {
     state: Arc<Mutex<MCServerState>>,
     jar_path: PathBuf,
