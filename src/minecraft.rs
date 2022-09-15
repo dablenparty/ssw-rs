@@ -6,6 +6,7 @@ use std::{
 
 use log::{error, info};
 use regex::Regex;
+use serde::{de::Error, Deserialize, Serialize};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt},
     select,
@@ -14,7 +15,9 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::util::pipe_readable_to_stdout;
+use crate::util::{
+    async_create_dir_if_not_exists, create_dir_if_not_exists, pipe_readable_to_stdout,
+};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -31,6 +34,7 @@ impl Default for MCServerState {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct SswConfig {
     memory_in_gb: f32,
     restart_timeout: f32,
@@ -51,6 +55,33 @@ impl Default for SswConfig {
             mc_version: None,
             required_java_version: "17.0".to_string(),
             extra_args: Vec::new(),
+        }
+    }
+}
+
+impl SswConfig {
+    /// Attempt to load a config from the given path
+    pub async fn new(config_path: &Path) -> serde_json::Result<Self> {
+        if !config_path.exists() {
+            let config = Self::default();
+            async_create_dir_if_not_exists(
+                &config_path
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from(".")),
+            )
+            .await
+            .map_err(serde_json::Error::custom)?;
+            let config_string = serde_json::to_string_pretty(&config)?;
+            tokio::fs::write(config_path, config_string)
+                .await
+                .map_err(serde_json::Error::custom)?;
+            Ok(config)
+        } else {
+            let config_string = tokio::fs::read_to_string(config_path)
+                .await
+                .map_err(serde_json::Error::custom)?;
+            serde_json::from_str(&config_string)
         }
     }
 }
