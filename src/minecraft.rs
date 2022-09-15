@@ -81,6 +81,8 @@ impl SswConfig {
             let config_string = tokio::fs::read_to_string(config_path)
                 .await
                 .map_err(serde_json::Error::custom)?;
+            // TODO: find a way to merge two bad configs
+            //? proc macro for struct -> HashMap
             serde_json::from_str(&config_string)
         }
     }
