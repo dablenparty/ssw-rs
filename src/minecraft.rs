@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use log::{error, info};
+use log::{error, info, debug};
 use regex::Regex;
 use serde::{de::Error, Deserialize, Serialize};
 use tokio::{
@@ -15,9 +15,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::util::{
-    async_create_dir_if_not_exists, create_dir_if_not_exists, pipe_readable_to_stdout,
-};
+use crate::util::{async_create_dir_if_not_exists, pipe_readable_to_stdout};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -34,7 +32,7 @@ impl Default for MCServerState {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct SswConfig {
     memory_in_gb: f32,
     restart_timeout: f32,
@@ -93,6 +91,7 @@ pub struct MinecraftServer {
     jar_path: PathBuf,
     exit_handler: Option<JoinHandle<()>>,
     server_stdin_sender: Option<Sender<String>>,
+    ssw_config: SswConfig,
 }
 
 impl MinecraftServer {
@@ -102,22 +101,41 @@ impl MinecraftServer {
             state: Arc::new(Mutex::new(MCServerState::Stopped)),
             exit_handler: None,
             server_stdin_sender: None,
+            ssw_config: SswConfig::default(),
         }
     }
 
-    pub fn run(&mut self) -> io::Result<()> {
+    pub async fn run(&mut self) -> io::Result<()> {
         // TODO: check java version
         info!("Checking Java version...");
-        // TODO: load config and server.properties
+        info!("Loading SSW config...");
+        let config_path = self
+            .jar_path
+            .parent()
+            .ok_or(io::Error::new(
+                io::ErrorKind::Other,
+                "Could not get parent directory of jar file",
+            ))?
+            .join(".ssw")
+            .join("ssw.json");
+        self.ssw_config = SswConfig::new(&config_path).await.unwrap_or_else(|e| {
+            error!("Failed to load SSW config: {}", e);
+            SswConfig::default()
+        });
+        info!("SSW config loaded: {:?}", self.ssw_config);
+        // TODO: load server.properties
         // TODO: patch Log4j
+        let memory_in_mb = self.ssw_config.memory_in_gb * 1024.0;
+        // ignore anything after the decimal point
+        let memory_arg = format!("-Xmx{}M", memory_in_mb as u32);
         let proc_args = vec![
             "java",
-            "-Xms1G",
-            "-Xmx1G",
+            "-Xms512M",
+            memory_arg.as_str(),
             "-jar",
-            self.jar_path
-                .to_str()
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid path"))?,
+            self.jar_path.to_str().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "Invalid unicode found in path")
+            })?,
             "nogui",
         ];
         {
@@ -232,7 +250,7 @@ impl MinecraftServer {
         let status_clone = self.state.clone();
         let exit_handler_handle = tokio::spawn(async move {
             match child.wait().await {
-                Ok(status) => info!("Server exited with status {}", status),
+                Ok(status) => debug!("Server exited with status {}", status),
                 Err(err) => error!("Error waiting for child process: {}", err),
             }
             // wait for all pipes to finish after cancelling them
