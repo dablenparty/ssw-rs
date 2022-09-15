@@ -63,7 +63,6 @@ impl MinecraftServer {
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid path"))?,
             "nogui",
         ];
-        // TODO: set this to starting, use ready event to set to running
         {
             *self.state.lock().unwrap() = MCServerState::Starting;
         }
