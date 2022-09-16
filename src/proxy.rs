@@ -70,7 +70,7 @@ pub async fn run_proxy(ssw_port: u32, cancellation_token: CancellationToken) -> 
             select! {
                 r = connection_handler(client) => {
                     if let Err(e) = r {
-                        error!("Error handling connection: {}", e);
+                        warn!("Error handling connection: {}", e);
                     } else {
                         debug!("Connection lost from {}", client_addr);
                     }
