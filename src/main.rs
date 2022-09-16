@@ -17,6 +17,8 @@ use simplelog::{
 use tokio::io::AsyncBufReadExt;
 use util::{create_dir_if_not_exists, get_exe_parent_dir};
 
+use crate::proxy::run_proxy;
+
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     if let Err(e) = init_logger() {
@@ -28,7 +30,11 @@ async fn main() -> std::io::Result<()> {
     let mut stdin_reader = tokio::io::BufReader::new(tokio::io::stdin());
     let cargo_version = env!("CARGO_PKG_VERSION");
     println!("SSW Console v{}", cargo_version);
+    let port = mc_server.config().ssw_port;
     // TODO: handle commands & errors properly without propagating them
+    let proxy_handle = tokio::spawn(async move {
+        run_proxy(port).await
+    });
     loop {
         let mut buf = Vec::new();
         stdin_reader.read_until(b'\n', &mut buf).await?;
@@ -75,6 +81,8 @@ async fn main() -> std::io::Result<()> {
             }
         }
     }
+    // TODO: cancellation token
+    proxy_handle.await??;
     Ok(())
 }
 
