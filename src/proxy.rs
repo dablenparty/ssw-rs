@@ -1,4 +1,4 @@
-use std::{io, time::Duration};
+use std::{collections::HashMap, io, net::SocketAddr, time::Duration};
 
 use log::{debug, error, info, warn};
 use tokio::{
@@ -10,6 +10,11 @@ use tokio::{
     task::JoinHandle,
 };
 
+enum ConnectionManagerEvent {
+    Connected(SocketAddr, JoinHandle<()>),
+    Disconnected(SocketAddr),
+}
+
 pub async fn run_proxy(ssw_port: u32) -> io::Result<()> {
     info!("Starting proxy on port {}", ssw_port);
     // TODO: resolve public IP and use it in the proxy
@@ -18,20 +23,59 @@ pub async fn run_proxy(ssw_port: u32) -> io::Result<()> {
     let listener = TcpListener::bind(&addr).await?;
     info!("Listening on {}", addr);
 
-    // TODO: set initial capacity to server player limit
-    let mut connections: Vec<JoinHandle<()>> = Vec::new();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<ConnectionManagerEvent>(100);
+    // TODO: when error handling is improved, shut this down properly
+    let _connection_manager_handle = tokio::spawn(async move {
+        // TODO: set initial capacity to server player limit
+        let mut connections: HashMap<SocketAddr, JoinHandle<()>> = HashMap::new();
+        loop {
+            if let Some(event) = rx.recv().await {
+                match event {
+                    ConnectionManagerEvent::Connected(addr, handle) => {
+                        if connections.contains_key(&addr) {
+                            // this shouldn't happen
+                            warn!("Connection already exists for {}", addr);
+                        } else {
+                            connections.insert(addr, handle);
+                        }
+                    }
+                    ConnectionManagerEvent::Disconnected(addr) => {
+                        connections.remove(&addr);
+                    }
+                }
+                debug!("There are now {} connections", connections.len());
+            } else {
+                error!("Connection manager channel closed");
+            }
+        }
+    });
 
     loop {
         let (client, client_addr) = listener.accept().await?;
         debug!("Accepted connection from {}", client_addr);
+        let tx_clone = tx.clone();
         let connection_handle = tokio::spawn(async move {
             if let Err(e) = connection_handler(client).await {
                 error!("Error handling connection: {}", e);
             } else {
                 debug!("Connection lost from {}", client_addr);
             }
+            if let Err(e) = tx_clone
+                .send(ConnectionManagerEvent::Disconnected(client_addr))
+                .await
+            {
+                error!("Error sending connection manager event: {}", e);
+            }
         });
-        connections.push(connection_handle);
+        if let Err(e) = tx
+            .send(ConnectionManagerEvent::Connected(
+                client_addr,
+                connection_handle,
+            ))
+            .await
+        {
+            error!("Error sending connection event: {}", e);
+        }
     }
 }
 
