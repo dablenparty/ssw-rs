@@ -24,8 +24,7 @@ enum ConnectionManagerEvent {
 
 pub async fn run_proxy(ssw_port: u32, cancellation_token: CancellationToken) -> io::Result<()> {
     info!("Starting proxy on port {}", ssw_port);
-    // TODO: resolve public IP and use it in the proxy
-    let addr = format!("{}:{}", "127.0.0.1", ssw_port);
+    let addr = format!("{}:{}", "0.0.0.0", ssw_port);
 
     let listener = TcpListener::bind(&addr).await?;
     info!("Listening on {}", addr);
