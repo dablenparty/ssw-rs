@@ -99,10 +99,10 @@ impl SswConfig {
 
 pub struct MinecraftServer {
     state: Arc<Mutex<MCServerState>>,
-    jar_path: PathBuf,
     exit_handler: Option<JoinHandle<()>>,
     server_stdin_sender: Option<Sender<String>>,
-    ssw_config: SswConfig,
+    jar_path: PathBuf,
+    pub ssw_config: SswConfig,
 }
 
 impl MinecraftServer {
@@ -252,11 +252,6 @@ impl MinecraftServer {
     /// Gets a clone of the `Arc<Mutex<MCServerState>>` for the server's state.
     pub fn status(&self) -> Arc<Mutex<MCServerState>> {
         self.state.clone()
-    }
-
-    /// Borrows a reference to the `SswConfig` for the server.
-    pub fn config(&self) -> &SswConfig {
-        &self.ssw_config
     }
 }
 

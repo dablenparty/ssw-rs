@@ -34,7 +34,7 @@ async fn main() -> std::io::Result<()> {
     let mut stdin_reader = tokio::io::BufReader::new(tokio::io::stdin());
     let cargo_version = env!("CARGO_PKG_VERSION");
     println!("SSW Console v{}", cargo_version);
-    let port = mc_server.config().ssw_port;
+    let port = mc_server.ssw_config.ssw_port;
     let (proxy_handle, proxy_cancel_token) = start_proxy_task(port);
     // TODO: handle commands & errors properly without propagating them
     loop {
