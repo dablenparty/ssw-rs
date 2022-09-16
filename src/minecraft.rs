@@ -286,4 +286,8 @@ impl MinecraftServer {
     pub fn status(&self) -> Arc<Mutex<MCServerState>> {
         self.state.clone()
     }
+
+    pub fn config(&self) -> &SswConfig {
+        &self.ssw_config
+    }
 }
