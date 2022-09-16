@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use log::{error, info, debug};
+use log::{debug, error, info};
 use regex::Regex;
 use serde::{de::Error, Deserialize, Serialize};
 use tokio::{
@@ -59,6 +59,17 @@ impl Default for SswConfig {
 
 impl SswConfig {
     /// Attempt to load a config from the given path
+    ///
+    /// # Arguments
+    ///
+    /// * `config_path` - The path to the config file. If it does not exist, it will be created with default values.
+    ///
+    /// # Errors
+    ///
+    /// An error may occur when reading or writing the config file, as well as in the serialization/deserialization process.
+    ///
+    /// returns: `serde_json::Result<SswConfig>`
+    ///
     pub async fn new(config_path: &Path) -> serde_json::Result<Self> {
         if !config_path.exists() {
             let config = Self::default();
@@ -105,6 +116,11 @@ impl MinecraftServer {
         }
     }
 
+    /// Run the Minecraft server process
+    ///
+    /// # Errors
+    ///
+    /// An error can occur when loading the config or when spawning the child process.
     pub async fn run(&mut self) -> io::Result<()> {
         // TODO: check java version
         info!("Checking Java version...");
@@ -272,6 +288,13 @@ impl MinecraftServer {
         Ok(())
     }
 
+    /// Waits for the server to exit.
+    ///
+    /// This works by taking ownership of the internal exit handler handle and awaiting it.
+    ///
+    /// # Errors:
+    ///
+    /// An error is returned if one occurs waiting for the exit handler.
     pub async fn wait_for_exit(&mut self) -> io::Result<()> {
         if let Some(handle) = self.exit_handler.take() {
             handle.await?;
@@ -279,14 +302,17 @@ impl MinecraftServer {
         Ok(())
     }
 
+    /// Gets a clone of the tokio mpsc channel sender for the server's stdin.
     pub fn get_server_sender(&self) -> Option<Sender<String>> {
         self.server_stdin_sender.clone()
     }
 
+    /// Gets a clone of the `Arc<Mutex<MCServerState>>` for the server's state.
     pub fn status(&self) -> Arc<Mutex<MCServerState>> {
         self.state.clone()
     }
 
+    /// Borrows a reference to the `SswConfig` for the server.
     pub fn config(&self) -> &SswConfig {
         &self.ssw_config
     }
