@@ -1,3 +1,5 @@
+#![allow(clippy::module_name_repetitions)]
+
 mod minecraft;
 mod proxy;
 mod util;

@@ -144,8 +144,9 @@ impl MinecraftServer {
         // TODO: load server.properties
         // TODO: patch Log4j
         let memory_in_mb = self.ssw_config.memory_in_gb * 1024.0;
-        // ignore anything after the decimal point
-        let memory_arg = format!("-Xmx{}M", memory_in_mb as u32);
+        // truncation is intentional
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let memory_arg = format!("-Xmx{}M", memory_in_mb.abs() as u32);
         let proc_args = vec![
             "java",
             "-Xms512M",
