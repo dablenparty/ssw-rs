@@ -9,7 +9,7 @@ use std::{
 
 use chrono::{DateTime, Local};
 use flate2::{Compression, GzBuilder};
-use log::{error, LevelFilter};
+use log::{error, info, LevelFilter};
 use simplelog::{
     format_description, ColorChoice, CombinedLogger, TermLogger, TerminalMode, ThreadLogMode,
     WriteLogger,
@@ -63,12 +63,7 @@ async fn main() -> std::io::Result<()> {
                     proxy_cancel_token.cancel();
                     break;
                 }
-                "help" => {
-                    println!("Available commands:");
-                    println!("    start - start the server");
-                    println!("    exit - exit ssw");
-                    println!("    help - show this help message");
-                }
+                "help" => print_help(),
                 _ => {
                     error!("Unknown command: {}", command);
                 }
@@ -77,6 +72,14 @@ async fn main() -> std::io::Result<()> {
     }
     proxy_handle.await??;
     Ok(())
+}
+
+/// Prints the SSW help message to the console
+fn print_help() {
+    info!("Available commands:");
+    info!("    start - start the server");
+    info!("    exit - exit ssw");
+    info!("    help - show this help message");
 }
 
 /// Starts the proxy task and returns a handle to it along with its cancellation token
