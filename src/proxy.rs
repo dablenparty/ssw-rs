@@ -5,15 +5,12 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpListener, TcpSocket, TcpStream,
+        TcpListener, TcpStream,
     },
     task::JoinHandle,
 };
 
-use crate::minecraft::MinecraftServer;
-
-pub async fn run_proxy(server: &MinecraftServer) -> io::Result<()> {
-    let ssw_port = server.config().ssw_port;
+pub async fn run_proxy(ssw_port: u32) -> io::Result<()> {
     info!("Starting proxy on port {}", ssw_port);
     // TODO: resolve public IP and use it in the proxy
     let addr = format!("{}:{}", "127.0.0.1", ssw_port);
@@ -30,14 +27,15 @@ pub async fn run_proxy(server: &MinecraftServer) -> io::Result<()> {
         let connection_handle = tokio::spawn(async move {
             if let Err(e) = connection_handler(client).await {
                 error!("Error handling connection: {}", e);
+            } else {
+                debug!("Connection lost from {}", client_addr);
             }
         });
         connections.push(connection_handle);
     }
-    Ok(())
 }
 
-async fn connection_handler(mut client_stream: TcpStream) -> io::Result<()> {
+async fn connection_handler(client_stream: TcpStream) -> io::Result<()> {
     // TODO: get port from server
     let server_stream = TcpStream::connect("127.0.0.1:25566").await?;
     // into_split is less efficient than split, but allows concurrent read/write
