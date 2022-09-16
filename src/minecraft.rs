@@ -73,6 +73,7 @@ impl SswConfig {
     ///
     pub async fn new(config_path: &Path) -> serde_json::Result<Self> {
         if config_path.exists() {
+            info!("Loading existing SSW config");
             let config_string = tokio::fs::read_to_string(config_path)
                 .await
                 .map_err(serde_json::Error::custom)?;
@@ -80,6 +81,10 @@ impl SswConfig {
             //? proc macro for struct -> HashMap
             serde_json::from_str(&config_string)
         } else {
+            info!(
+                "No SSW config found, creating default config at {}",
+                config_path.display()
+            );
             let config = Self::default();
             async_create_dir_if_not_exists(
                 &config_path
@@ -138,6 +143,7 @@ impl MinecraftServer {
             .join("ssw.json");
         self.ssw_config = SswConfig::new(&config_path).await.unwrap_or_else(|e| {
             error!("Failed to load SSW config: {}", e);
+            error!("Using default SSW config");
             SswConfig::default()
         });
         info!("SSW config loaded: {:?}", self.ssw_config);
