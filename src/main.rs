@@ -14,7 +14,7 @@ use simplelog::{
     format_description, ColorChoice, CombinedLogger, TermLogger, TerminalMode, ThreadLogMode,
     WriteLogger,
 };
-use tokio::{io::AsyncBufReadExt, select};
+use tokio::{io::AsyncBufReadExt, select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use util::{create_dir_if_not_exists, get_exe_parent_dir};
 
@@ -26,26 +26,15 @@ async fn main() -> std::io::Result<()> {
         error!("failed to initialize logger: {:?}", e);
         std::process::exit(1);
     }
+    // TODO: command line arg parser
     let path = std::env::args().nth(1).expect("Missing path to server jar");
     let mut mc_server = minecraft::MinecraftServer::new(dunce::canonicalize(PathBuf::from(path))?);
     let mut stdin_reader = tokio::io::BufReader::new(tokio::io::stdin());
     let cargo_version = env!("CARGO_PKG_VERSION");
     println!("SSW Console v{}", cargo_version);
     let port = mc_server.config().ssw_port;
+    let (proxy_handle, proxy_cancel_token) = start_proxy_task(port);
     // TODO: handle commands & errors properly without propagating them
-    let proxy_cancel_token = CancellationToken::new();
-    let cloned_token = proxy_cancel_token.clone();
-    let proxy_handle = tokio::spawn(async move {
-        let inner_clone = cloned_token.clone();
-        select! {
-            r = run_proxy(port, inner_clone) => {
-                r
-            },
-            _ = cloned_token.cancelled() => {
-                Ok(())
-            }
-        }
-    });
     loop {
         let mut buf = Vec::new();
         stdin_reader.read_until(b'\n', &mut buf).await?;
@@ -88,6 +77,32 @@ async fn main() -> std::io::Result<()> {
     }
     proxy_handle.await??;
     Ok(())
+}
+
+/// Starts the proxy task and returns a handle to it along with its cancellation token
+///
+/// The proxy task itself returns an `io::Result<()>`.
+///
+/// # Arguments
+///
+/// * `port` - The port to listen on
+///
+/// returns: `(JoinHandle<io::Result<()>>, CancellationToken)`
+fn start_proxy_task(port: u32) -> (JoinHandle<io::Result<()>>, CancellationToken) {
+    let token = CancellationToken::new();
+    let cloned_token = token.clone();
+    let handle = tokio::spawn(async move {
+        let inner_clone = cloned_token.clone();
+        select! {
+            r = run_proxy(port, inner_clone) => {
+                r
+            },
+            _ = cloned_token.cancelled() => {
+                Ok(())
+            }
+        }
+    });
+    (handle, token)
 }
 
 /// Zip up the previous logs and start a new log file.
