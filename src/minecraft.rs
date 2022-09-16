@@ -34,13 +34,13 @@ impl Default for MCServerState {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SswConfig {
-    memory_in_gb: f32,
-    restart_timeout: f32,
-    shutdown_timeout: f32,
-    ssw_port: u32,
-    mc_version: Option<String>,
-    required_java_version: String,
-    extra_args: Vec<String>,
+    pub memory_in_gb: f32,
+    pub restart_timeout: f32,
+    pub shutdown_timeout: f32,
+    pub ssw_port: u32,
+    pub mc_version: Option<String>,
+    pub required_java_version: String,
+    pub extra_args: Vec<String>,
 }
 
 impl Default for SswConfig {
