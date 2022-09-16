@@ -9,9 +9,9 @@ use regex::Regex;
 use serde::{de::Error, Deserialize, Serialize};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt},
-    process::ChildStdout,
+    process::{ChildStdin, ChildStdout},
     select,
-    sync::mpsc::Sender,
+    sync::mpsc::{Receiver, Sender},
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
@@ -196,33 +196,10 @@ impl MinecraftServer {
         let proc_stdin = child.stdin.take().unwrap();
         let stdin_token = CancellationToken::new();
         let cloned_token = stdin_token.clone();
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(3);
+        let (tx, rx) = tokio::sync::mpsc::channel::<String>(3);
         self.server_stdin_sender = Some(tx);
         let stdin_handle = tokio::spawn(async move {
-            // TODO: extract to a function, this looks confusing
-            if let Err(err) = async {
-                let mut proc_stdin = tokio::io::BufWriter::new(proc_stdin);
-                loop {
-                    select! {
-                        msg = rx.recv() => {
-                            if let Some(mut msg) = msg {
-                                if !msg.ends_with('\n') {
-                                    msg.push('\n');
-                                }
-                                proc_stdin.write_all(msg.as_bytes()).await?;
-                                proc_stdin.flush().await?;
-                            }
-                        }
-
-                        _ = cloned_token.cancelled() => {
-                            break;
-                        }
-                    }
-                }
-                Ok::<(), io::Error>(())
-            }
-            .await
-            {
+            if let Err(err) = pipe_stdin(proc_stdin, rx, cloned_token).await {
                 error!("Error reading from stdin: {}", err);
             }
         });
@@ -331,6 +308,43 @@ async fn pipe_and_monitor_stdout(
                 }
                 buf.clear();
             }
+            _ = cancellation_token.cancelled() => {
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Pipes messages received by the given `rx` to the given `ChildStdin`.
+///
+/// # Arguments
+///
+/// * `stdin` - The `ChildStdin` to pipe to.
+/// * `rx` - The `Receiver` to receive messages from.
+/// * `cancellation_token` - The `CancellationToken` to use to cancel the pipe.
+///
+/// # Errors
+///
+/// An error will be returned if one occurs writing to the `ChildStdin`.
+async fn pipe_stdin(
+    stdin: ChildStdin,
+    mut rx: Receiver<String>,
+    cancellation_token: CancellationToken,
+) -> io::Result<()> {
+    let mut stdin_writer = tokio::io::BufWriter::new(stdin);
+    loop {
+        select! {
+            msg = rx.recv() => {
+                if let Some(mut msg) = msg {
+                    if !msg.ends_with('\n') {
+                        msg.push('\n');
+                    }
+                    stdin_writer.write_all(msg.as_bytes()).await?;
+                    stdin_writer.flush().await?;
+                }
+            }
+
             _ = cancellation_token.cancelled() => {
                 break;
             }
