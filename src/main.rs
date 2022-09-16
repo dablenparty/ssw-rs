@@ -1,4 +1,5 @@
 mod minecraft;
+mod proxy;
 mod util;
 
 use std::{
