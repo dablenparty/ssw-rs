@@ -105,7 +105,6 @@ pub fn get_exe_parent_dir() -> PathBuf {
             );
             resolved_path
         })
-        .to_path_buf()
 }
 
 /// Synchronously creates a directory if it does not exist, failing if some other error occurs

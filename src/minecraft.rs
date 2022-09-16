@@ -71,13 +71,19 @@ impl SswConfig {
     /// returns: `serde_json::Result<SswConfig>`
     ///
     pub async fn new(config_path: &Path) -> serde_json::Result<Self> {
-        if !config_path.exists() {
+        if config_path.exists() {
+            let config_string = tokio::fs::read_to_string(config_path)
+                .await
+                .map_err(serde_json::Error::custom)?;
+            // TODO: find a way to merge two bad configs
+            //? proc macro for struct -> HashMap
+            serde_json::from_str(&config_string)
+        } else {
             let config = Self::default();
             async_create_dir_if_not_exists(
                 &config_path
                     .parent()
-                    .map(|p| p.to_path_buf())
-                    .unwrap_or_else(|| PathBuf::from(".")),
+                    .map_or_else(|| PathBuf::from("."), Path::to_path_buf),
             )
             .await
             .map_err(serde_json::Error::custom)?;
@@ -86,13 +92,6 @@ impl SswConfig {
                 .await
                 .map_err(serde_json::Error::custom)?;
             Ok(config)
-        } else {
-            let config_string = tokio::fs::read_to_string(config_path)
-                .await
-                .map_err(serde_json::Error::custom)?;
-            // TODO: find a way to merge two bad configs
-            //? proc macro for struct -> HashMap
-            serde_json::from_str(&config_string)
         }
     }
 }
@@ -128,10 +127,12 @@ impl MinecraftServer {
         let config_path = self
             .jar_path
             .parent()
-            .ok_or(io::Error::new(
-                io::ErrorKind::Other,
-                "Could not get parent directory of jar file",
-            ))?
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    "Could not get parent directory of jar file",
+                )
+            })?
             .join(".ssw")
             .join("ssw.json");
         self.ssw_config = SswConfig::new(&config_path).await.unwrap_or_else(|e| {

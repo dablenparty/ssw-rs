@@ -1,4 +1,9 @@
-use std::{collections::HashMap, io, net::SocketAddr, time::Duration};
+use std::{
+    collections::{hash_map, HashMap},
+    io,
+    net::SocketAddr,
+    time::Duration,
+};
 
 use log::{debug, error, info, warn};
 use tokio::{
@@ -37,11 +42,11 @@ pub async fn run_proxy(ssw_port: u32, cancellation_token: CancellationToken) -> 
                     if let Some(event) = msg {
                         match event {
                             ConnectionManagerEvent::Connected(addr, handle) => {
-                                if connections.contains_key(&addr) {
+                                if let hash_map::Entry::Vacant(entry) = connections.entry(addr) {
+                                    entry.insert(handle);
+                                } else {
                                     // this shouldn't happen
                                     warn!("Connection already exists for {}", addr);
-                                } else {
-                                    connections.insert(addr, handle);
                                 }
                             }
                             ConnectionManagerEvent::Disconnected(addr) => {
@@ -135,24 +140,21 @@ async fn pass_between_streams(mut from: OwnedReadHalf, mut to: OwnedWriteHalf) -
     loop {
         let mut buf = [0; 4096];
         let read_future = from.read(&mut buf);
-        match tokio::time::timeout(Duration::from_secs(5), read_future).await {
-            Ok(n) => {
-                let n = n?;
-                // most often occurs when EOF is reached
-                if n == 0 {
-                    break;
-                }
-                to.write_all(&buf[..n]).await?;
-                to.flush().await?;
+        if let Ok(n) = tokio::time::timeout(Duration::from_secs(5), read_future).await {
+            let n = n?;
+            // most often occurs when EOF is reached
+            if n == 0 {
+                break;
             }
-            Err(_) => {
-                timeouts += 1;
-                // TODO: extract to constant
-                if timeouts >= 3 {
-                    // stop trying to read after 3 timeouts
-                    warn!("No data received from client for 15 seconds, closing connection");
-                    break;
-                }
+            to.write_all(&buf[..n]).await?;
+            to.flush().await?;
+        } else {
+            timeouts += 1;
+            // TODO: extract to constant
+            if timeouts >= 3 {
+                // stop trying to read after 3 timeouts
+                warn!("No data received from client for 15 seconds, closing connection");
+                break;
             }
         }
     }

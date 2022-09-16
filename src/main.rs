@@ -120,7 +120,7 @@ fn zip_logs() -> io::Result<PathBuf> {
         // get the creation date of the file as a chrono DateTime, or use the current time if it fails
         let create_time = std::fs::metadata(&latest_log)?
             .created()
-            .map_or_else(|_| Local::now(), |value| DateTime::<Local>::from(value));
+            .map_or_else(|_| Local::now(), DateTime::<Local>::from);
         let package_name = env!("CARGO_PKG_NAME");
         let dated_name = create_time
             .format(&format!("{}-%Y-%m-%d-%H-%M-%S.log", package_name))
