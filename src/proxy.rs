@@ -7,15 +7,17 @@ use tokio::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpListener, TcpStream,
     },
+    select,
     task::JoinHandle,
 };
+use tokio_util::sync::CancellationToken;
 
 enum ConnectionManagerEvent {
     Connected(SocketAddr, JoinHandle<()>),
     Disconnected(SocketAddr),
 }
 
-pub async fn run_proxy(ssw_port: u32) -> io::Result<()> {
+pub async fn run_proxy(ssw_port: u32, cancellation_token: CancellationToken) -> io::Result<()> {
     info!("Starting proxy on port {}", ssw_port);
     // TODO: resolve public IP and use it in the proxy
     let addr = format!("{}:{}", "127.0.0.1", ssw_port);
@@ -25,27 +27,36 @@ pub async fn run_proxy(ssw_port: u32) -> io::Result<()> {
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<ConnectionManagerEvent>(100);
     // TODO: when error handling is improved, shut this down properly
+    let connection_manager_token = cancellation_token.clone();
     let _connection_manager_handle = tokio::spawn(async move {
         // TODO: set initial capacity to server player limit
         let mut connections: HashMap<SocketAddr, JoinHandle<()>> = HashMap::new();
         loop {
-            if let Some(event) = rx.recv().await {
-                match event {
-                    ConnectionManagerEvent::Connected(addr, handle) => {
-                        if connections.contains_key(&addr) {
-                            // this shouldn't happen
-                            warn!("Connection already exists for {}", addr);
-                        } else {
-                            connections.insert(addr, handle);
+            select! {
+                msg = rx.recv() => {
+                    if let Some(event) = msg {
+                        match event {
+                            ConnectionManagerEvent::Connected(addr, handle) => {
+                                if connections.contains_key(&addr) {
+                                    // this shouldn't happen
+                                    warn!("Connection already exists for {}", addr);
+                                } else {
+                                    connections.insert(addr, handle);
+                                }
+                            }
+                            ConnectionManagerEvent::Disconnected(addr) => {
+                                connections.remove(&addr);
+                            }
                         }
+                        debug!("There are now {} connections", connections.len());
+                    } else {
+                        error!("Connection manager channel closed");
                     }
-                    ConnectionManagerEvent::Disconnected(addr) => {
-                        connections.remove(&addr);
-                    }
+                },
+
+                _ = connection_manager_token.cancelled() => {
+                    break;
                 }
-                debug!("There are now {} connections", connections.len());
-            } else {
-                error!("Connection manager channel closed");
             }
         }
     });
@@ -54,17 +65,25 @@ pub async fn run_proxy(ssw_port: u32) -> io::Result<()> {
         let (client, client_addr) = listener.accept().await?;
         debug!("Accepted connection from {}", client_addr);
         let tx_clone = tx.clone();
+        let connection_token = cancellation_token.clone();
         let connection_handle = tokio::spawn(async move {
-            if let Err(e) = connection_handler(client).await {
-                error!("Error handling connection: {}", e);
-            } else {
-                debug!("Connection lost from {}", client_addr);
-            }
-            if let Err(e) = tx_clone
-                .send(ConnectionManagerEvent::Disconnected(client_addr))
-                .await
-            {
-                error!("Error sending connection manager event: {}", e);
+            select! {
+                r = connection_handler(client) => {
+                    if let Err(e) = r {
+                        error!("Error handling connection: {}", e);
+                    } else {
+                        debug!("Connection lost from {}", client_addr);
+                    }
+                    if let Err(e) = tx_clone
+                        .send(ConnectionManagerEvent::Disconnected(client_addr))
+                        .await
+                    {
+                        error!("Error sending connection manager event: {}", e);
+                    }
+                },
+                _ = connection_token.cancelled() => {
+                    debug!("Connection cancelled from {}", client_addr);
+                }
             }
         });
         if let Err(e) = tx

@@ -14,7 +14,8 @@ use simplelog::{
     format_description, ColorChoice, CombinedLogger, TermLogger, TerminalMode, ThreadLogMode,
     WriteLogger,
 };
-use tokio::io::AsyncBufReadExt;
+use tokio::{io::AsyncBufReadExt, select};
+use tokio_util::sync::CancellationToken;
 use util::{create_dir_if_not_exists, get_exe_parent_dir};
 
 use crate::proxy::run_proxy;
@@ -32,8 +33,18 @@ async fn main() -> std::io::Result<()> {
     println!("SSW Console v{}", cargo_version);
     let port = mc_server.config().ssw_port;
     // TODO: handle commands & errors properly without propagating them
+    let proxy_cancel_token = CancellationToken::new();
+    let cloned_token = proxy_cancel_token.clone();
     let proxy_handle = tokio::spawn(async move {
-        run_proxy(port).await
+        let inner_clone = cloned_token.clone();
+        select! {
+            r = run_proxy(port, inner_clone) => {
+                r
+            },
+            _ = cloned_token.cancelled() => {
+                Ok(())
+            }
+        }
     });
     loop {
         let mut buf = Vec::new();
@@ -67,6 +78,7 @@ async fn main() -> std::io::Result<()> {
                         }
                         mc_server.wait_for_exit().await?;
                     }
+                    proxy_cancel_token.cancel();
                     break;
                 }
                 "help" => {
@@ -81,7 +93,6 @@ async fn main() -> std::io::Result<()> {
             }
         }
     }
-    // TODO: cancellation token
     proxy_handle.await??;
     Ok(())
 }
