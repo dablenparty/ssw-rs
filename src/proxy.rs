@@ -109,8 +109,10 @@ async fn connection_handler(client_stream: TcpStream) -> io::Result<()> {
     // into_split is less efficient than split, but allows concurrent read/write
     let (from_client, to_client) = client_stream.into_split();
     let (from_server, to_server) = server_stream.into_split();
-    let client_to_server = pass_between_streams(from_client, to_server);
-    let server_to_client = pass_between_streams(from_server, to_client);
+    let client_to_server =
+        tokio::spawn(async move { pass_between_streams(from_client, to_server).await });
+    let server_to_client =
+        tokio::spawn(async move { pass_between_streams(from_server, to_client).await });
     let results = futures::future::join_all(vec![client_to_server, server_to_client]).await;
     for r in results {
         if let Err(e) = r {
@@ -138,7 +140,8 @@ async fn pass_between_streams(mut from: OwnedReadHalf, mut to: OwnedWriteHalf) -
     // TODO: extract constant for buffer size
     let mut timeouts = 0;
     loop {
-        let mut buf = [0; 4096];
+        const BUFFER_SIZE: usize = 16 * 1024;
+        let mut buf = [0; BUFFER_SIZE];
         let read_future = from.read(&mut buf);
         if let Ok(n) = tokio::time::timeout(Duration::from_secs(5), read_future).await {
             let n = n?;
