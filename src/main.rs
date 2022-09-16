@@ -70,14 +70,7 @@ async fn main() -> std::io::Result<()> {
                     }
                 }
                 "exit" => {
-                    if status == minecraft::MCServerState::Running {
-                        if let Some(sender) = mc_server.get_server_sender() {
-                            if let Err(err) = sender.send("stop\n".to_string()).await {
-                                error!("Error sending message to server: {}", err);
-                            }
-                        }
-                        mc_server.wait_for_exit().await?;
-                    }
+                    // no need to check for running server, this branch only executes if the server is stopped
                     proxy_cancel_token.cancel();
                     break;
                 }
