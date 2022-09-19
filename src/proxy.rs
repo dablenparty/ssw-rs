@@ -29,7 +29,7 @@ pub async fn run_proxy(ssw_port: u32, cancellation_token: CancellationToken) -> 
     let listener = TcpListener::bind(&addr).await?;
     info!("Listening on {}", addr);
 
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<ConnectionManagerEvent>(100);
+    let (connection_manager_tx, mut connection_manager_rx) = tokio::sync::mpsc::channel::<ConnectionManagerEvent>(100);
     // TODO: when error handling is improved, shut this down properly
     let connection_manager_token = cancellation_token.clone();
     let _connection_manager_handle = tokio::spawn(async move {
@@ -37,7 +37,7 @@ pub async fn run_proxy(ssw_port: u32, cancellation_token: CancellationToken) -> 
         let mut connections: HashMap<SocketAddr, JoinHandle<()>> = HashMap::new();
         loop {
             select! {
-                msg = rx.recv() => {
+                msg = connection_manager_rx.recv() => {
                     if let Some(event) = msg {
                         match event {
                             ConnectionManagerEvent::Connected(addr, handle) => {
@@ -68,7 +68,7 @@ pub async fn run_proxy(ssw_port: u32, cancellation_token: CancellationToken) -> 
     loop {
         let (client, client_addr) = listener.accept().await?;
         debug!("Accepted connection from {}", client_addr);
-        let tx_clone = tx.clone();
+        let tx_clone = connection_manager_tx.clone();
         let connection_token = cancellation_token.clone();
         let connection_handle = tokio::spawn(async move {
             select! {
@@ -90,7 +90,7 @@ pub async fn run_proxy(ssw_port: u32, cancellation_token: CancellationToken) -> 
                 }
             }
         });
-        if let Err(e) = tx
+        if let Err(e) = connection_manager_tx
             .send(ConnectionManagerEvent::Connected(
                 client_addr,
                 connection_handle,
