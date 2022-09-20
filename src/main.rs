@@ -12,16 +12,20 @@ use std::{
 
 use chrono::{DateTime, Local};
 use flate2::{Compression, GzBuilder};
-use log::{error, info, LevelFilter};
+use log::{debug, error, info, LevelFilter};
 use simplelog::{
     format_description, ColorChoice, CombinedLogger, TermLogger, TerminalMode, ThreadLogMode,
     WriteLogger,
 };
-use tokio::{io::AsyncBufReadExt, select, task::JoinHandle};
+use tokio::{io::AsyncBufReadExt, select, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use util::{create_dir_if_not_exists, get_exe_parent_dir};
 
 use crate::proxy::run_proxy;
+
+enum Event {
+    StdinMessage(String),
+}
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -32,47 +36,60 @@ async fn main() -> std::io::Result<()> {
     // TODO: command line arg parser
     let path = std::env::args().nth(1).expect("Missing path to server jar");
     let mut mc_server = minecraft::MinecraftServer::new(dunce::canonicalize(PathBuf::from(path))?);
-    let mut stdin_reader = tokio::io::BufReader::new(tokio::io::stdin());
     let cargo_version = env!("CARGO_PKG_VERSION");
     println!("SSW Console v{}", cargo_version);
     let port = mc_server.ssw_config.ssw_port;
+    // TODO: broadcast channel for shutdown (see https://tokio.rs/tokio/topics/shutdown)
     let (proxy_handle, proxy_cancel_token) = start_proxy_task(port);
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<Event>(100);
+    //? separate cancel token
+    let stdin_handle = start_stdin_task(event_tx.clone(), proxy_cancel_token.clone());
     // TODO: handle commands & errors properly without propagating them
     loop {
-        let mut buf = Vec::new();
-        stdin_reader.read_until(b'\n', &mut buf).await?;
-        let msg = String::from_utf8_lossy(&buf).into_owned();
-        let status = *mc_server.status().lock().unwrap();
-        if status == minecraft::MCServerState::Running {
-            if let Some(sender) = mc_server.get_server_sender() {
-                if let Err(err) = sender.send(msg).await {
-                    error!("Error sending message to server: {}", err);
-                }
-            } else {
-                error!("Server is running but no sender is available");
-            }
-        } else {
-            let command = msg.trim();
-            match command {
-                "start" => {
-                    if status == minecraft::MCServerState::Stopped {
-                        mc_server.run().await?;
+        let event = event_rx.recv().await;
+        if event.is_none() {
+            error!("Event channel prematurely closed!");
+            break;
+        }
+        let event = event.unwrap();
+        let current_server_status = *mc_server.status().lock().unwrap();
+        match event {
+            Event::StdinMessage(msg) => {
+                if current_server_status == minecraft::MCServerState::Running {
+                    if let Some(sender) = mc_server.get_server_sender() {
+                        if let Err(err) = sender.send(msg).await {
+                            error!("Error sending message to server: {}", err);
+                        }
                     } else {
-                        error!("Server is already running");
+                        error!("Server is running but no sender is available");
                     }
-                }
-                "exit" => {
-                    // no need to check for running server, this branch only executes if the server is stopped
-                    proxy_cancel_token.cancel();
-                    break;
-                }
-                "help" => print_help(),
-                _ => {
-                    error!("Unknown command: {}", command);
+                } else {
+                    let command = msg.trim();
+                    match command {
+                        "start" => {
+                            if current_server_status == minecraft::MCServerState::Stopped {
+                                mc_server.run().await?;
+                            } else {
+                                error!("Server is already running");
+                            }
+                        }
+                        "exit" => {
+                            // no need to check for running server, this branch only executes if the server is stopped
+                            proxy_cancel_token.cancel();
+                            // TODO: eliminate the need for this
+                            println!("Press Enter to exit");
+                            break;
+                        }
+                        "help" => print_help(),
+                        _ => {
+                            error!("Unknown command: {}", command);
+                        }
+                    }
                 }
             }
         }
     }
+    stdin_handle.await??;
     proxy_handle.await??;
     Ok(())
 }
@@ -109,6 +126,39 @@ fn start_proxy_task(port: u32) -> (JoinHandle<io::Result<()>>, CancellationToken
         }
     });
     (handle, token)
+}
+
+/// Start the task that reads from stdin and sends the messages through the given channel
+///
+/// # Arguments
+///
+/// * `tx` - The channel to send the messages through
+/// * `cancel_token` - The cancellation token to use
+fn start_stdin_task(
+    tx: Sender<Event>,
+    cancel_token: CancellationToken,
+) -> JoinHandle<io::Result<()>> {
+    let mut stdin_reader = tokio::io::BufReader::new(tokio::io::stdin());
+    tokio::spawn(async move {
+        loop {
+            let mut buf = String::new();
+            select! {
+                n = stdin_reader.read_line(&mut buf) => {
+                    let n = n?;
+                    debug!("Read {} bytes from stdin", n);
+                    if let Err(e) = tx.send(Event::StdinMessage(buf)).await {
+                        error!("Error sending message from stdin task: {}", e);
+                    }
+                },
+                _ = cancel_token.cancelled() => {
+                    break;
+                }
+            }
+        }
+        // used to allow ? operator
+        #[allow(unreachable_code)]
+        Ok::<(), io::Error>(())
+    })
 }
 
 /// Zip up the previous logs and start a new log file.
