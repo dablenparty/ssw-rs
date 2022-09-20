@@ -143,6 +143,12 @@ fn zip_logs() -> io::Result<PathBuf> {
     Ok(latest_log)
 }
 
+/// Initializes the logger
+///
+/// In debug mode, the logger will log DEBUG and above. In release, it will log INFO and above.
+/// Both modes will log to the console and to a file.
+///
+/// returns: `Result<(), Box<dyn std::error::Error>>`
 fn init_logger() -> Result<(), Box<dyn std::error::Error>> {
     let config = simplelog::ConfigBuilder::new()
         .set_time_format_custom(format_description!("[[[hour]:[minute]:[second]]"))
