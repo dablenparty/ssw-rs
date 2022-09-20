@@ -29,7 +29,8 @@ pub async fn run_proxy(ssw_port: u32, cancellation_token: CancellationToken) -> 
     let listener = TcpListener::bind(&addr).await?;
     info!("Listening on {}", addr);
 
-    let (connection_manager_tx, mut connection_manager_rx) = tokio::sync::mpsc::channel::<ConnectionManagerEvent>(100);
+    let (connection_manager_tx, mut connection_manager_rx) =
+        tokio::sync::mpsc::channel::<ConnectionManagerEvent>(100);
     // TODO: when error handling is improved, shut this down properly
     let connection_manager_token = cancellation_token.clone();
     let _connection_manager_handle = tokio::spawn(async move {
