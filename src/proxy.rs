@@ -103,22 +103,20 @@ pub async fn run_proxy(ssw_port: u32, cancellation_token: CancellationToken) -> 
     }
 }
 
-async fn connection_handler(client_stream: TcpStream) -> io::Result<()> {
+/// Handles a connection from a client to the proxy.
+/// This will open an extra stream to the server and copy the IO between the two, bidirectionally.
+///
+/// # Arguments
+///
+/// * `client_stream` - The `TcpStream` from the client.
+///
+/// returns: `io::Result<()>`
+async fn connection_handler(mut client_stream: TcpStream) -> io::Result<()> {
     // TODO: get port from server
-    let server_stream = TcpStream::connect("127.0.0.1:25566").await?;
-    // into_split is less efficient than split, but allows concurrent read/write
-    let (from_client, to_client) = client_stream.into_split();
-    let (from_server, to_server) = server_stream.into_split();
-    let client_to_server =
-        tokio::spawn(async move { pass_between_streams(from_client, to_server).await });
-    let server_to_client =
-        tokio::spawn(async move { pass_between_streams(from_server, to_client).await });
-    let results = futures::future::join_all(vec![client_to_server, server_to_client]).await;
-    for r in results {
-        if let Err(e) = r {
-            error!("Error passing data between streams: {}", e);
-        }
-    }
+    let mut server_stream = TcpStream::connect("127.0.0.1:25566").await?;
+    // I'm upset I didn't find this sooner. This function solved almost all performance issues with
+    // the proxy and passing TCP packets between the client and server.
+    tokio::io::copy_bidirectional(&mut client_stream, &mut server_stream).await?;
     Ok(())
 }
 
