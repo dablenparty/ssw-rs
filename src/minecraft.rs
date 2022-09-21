@@ -121,6 +121,25 @@ impl MinecraftServer {
         }
     }
 
+    /// Stop the server if it is running
+    pub async fn stop(&self) {
+        self.send_command("stop".to_string()).await;
+    }
+
+    /// Send a command to the server if it is running
+    ///
+    /// # Arguments
+    ///
+    /// * `command` - The command to send to the server
+    pub async fn send_command(&self, command: String) {
+        //? TODO: propagate error
+        if let Some(ref sender) = self.server_stdin_sender {
+            if let Err(e) = sender.send(command).await {
+                error!("Failed to send command to server: {}", e);
+            }
+        }
+    }
+
     /// Run the Minecraft server process
     ///
     /// # Errors
@@ -248,11 +267,6 @@ impl MinecraftServer {
             handle.await?;
         }
         Ok(())
-    }
-
-    /// Gets a clone of the tokio mpsc channel sender for the server's stdin.
-    pub fn get_server_sender(&self) -> Option<Sender<String>> {
-        self.server_stdin_sender.clone()
     }
 
     /// Gets a clone of the `Arc<Mutex<MCServerState>>` for the server's state.
