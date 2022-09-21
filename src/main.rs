@@ -46,7 +46,10 @@ async fn main() -> std::io::Result<()> {
     let cargo_version = env!("CARGO_PKG_VERSION");
     println!("SSW Console v{}", cargo_version);
     let port = mc_server.ssw_config.ssw_port;
-    // TODO: broadcast channel for shutdown (see https://tokio.rs/tokio/topics/shutdown)
+    // TODO: only run proxy when the server is off
+    // maybe it's implementation, maybe it's limitation, but when connecting through the proxy,
+    // pings are consistently 40-100ms slower than when connecting directly to the server. I don't know
+    // why this is, but it's a problem.
     let (proxy_handle, proxy_cancel_token) = start_proxy_task(port);
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<Event>(100);
     let (stdin_tx, stdin_rx) = tokio::sync::mpsc::channel::<bool>(1);
