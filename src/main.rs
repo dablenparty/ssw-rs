@@ -63,35 +63,40 @@ async fn main() -> std::io::Result<()> {
         let current_server_status = *mc_server.status().lock().unwrap();
         match event {
             Event::StdinMessage(msg) => {
-                if current_server_status == minecraft::MCServerState::Running {
-                    if let Some(sender) = mc_server.get_server_sender() {
-                        if let Err(err) = sender.send(msg).await {
-                            error!("Error sending message to server: {}", err);
+                let command = msg.trim();
+                match command {
+                    "start" => {
+                        if current_server_status == minecraft::MCServerState::Stopped {
+                            mc_server.run().await?;
+                        } else {
+                            info!("Server is already running");
                         }
-                    } else {
-                        error!("Server is running but no sender is available");
                     }
-                } else {
-                    let command = msg.trim();
-                    match command {
-                        "start" => {
-                            if current_server_status == minecraft::MCServerState::Stopped {
-                                mc_server.run().await?;
-                            } else {
-                                error!("Server is already running");
+                    EXIT_COMMAND => {
+                        if current_server_status == minecraft::MCServerState::Running
+                            || current_server_status == minecraft::MCServerState::Starting
+                        {
+                            info!("Server is currently running, stopping it first");
+                            mc_server.stop().await;
+                            if let Err(e) = mc_server.wait_for_exit().await {
+                                error!("Failed to wait for server to exit: {}", e);
                             }
                         }
-                        EXIT_COMMAND => {
-                            // no need to check for running server, this branch only executes if the server is stopped
-                            // TODO: move this match up and allow exit to shutdown the server if it's running
-                            proxy_cancel_token.cancel();
-                            if let Err(e) = stdin_tx.send(true).await {
-                                error!("Failed to send exit signal to stdin task: {:?}", e);
-                            }
-                            break;
+                        // no need to check for running server, this branch only executes if the server is stopped
+                        // TODO: move this match up and allow exit to shutdown the server if it's running
+                        proxy_cancel_token.cancel();
+                        if let Err(e) = stdin_tx.send(true).await {
+                            error!("Failed to send exit signal to stdin task: {:?}", e);
                         }
-                        "help" => print_help(),
-                        _ => {
+                        break;
+                    }
+                    "help" if current_server_status != minecraft::MCServerState::Running => {
+                        print_help()
+                    }
+                    _ => {
+                        if current_server_status == minecraft::MCServerState::Running {
+                            mc_server.send_command(command.to_string()).await;
+                        } else {
                             error!("Unknown command: {}", command);
                         }
                     }
