@@ -17,12 +17,7 @@ use simplelog::{
     format_description, ColorChoice, CombinedLogger, TermLogger, TerminalMode, ThreadLogMode,
     WriteLogger,
 };
-use tokio::{
-    io::AsyncBufReadExt,
-    select,
-    sync::mpsc::{Receiver, Sender},
-    task::JoinHandle,
-};
+use tokio::{io::AsyncBufReadExt, select, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use util::{create_dir_if_not_exists, get_exe_parent_dir};
 
@@ -48,9 +43,8 @@ async fn main() -> std::io::Result<()> {
     let port = mc_server.ssw_config.ssw_port;
     let (proxy_handle, proxy_cancel_token) = start_proxy_task(port);
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<Event>(100);
-    let (stdin_tx, stdin_rx) = tokio::sync::mpsc::channel::<bool>(1);
     //? separate cancel token
-    let stdin_handle = start_stdin_task(event_tx.clone(), stdin_rx, proxy_cancel_token.clone());
+    let stdin_handle = start_stdin_task(event_tx.clone(), proxy_cancel_token.clone());
     loop {
         let event = event_rx.recv().await;
         if event.is_none() {
@@ -83,9 +77,6 @@ async fn main() -> std::io::Result<()> {
                             }
                         }
                         proxy_cancel_token.cancel();
-                        if let Err(e) = stdin_tx.send(true).await {
-                            error!("Failed to send exit signal to stdin task: {:?}", e);
-                        }
                         break;
                     }
                     "help" if current_server_status != minecraft::MCServerState::Running => {
@@ -149,7 +140,6 @@ fn start_proxy_task(port: u32) -> (JoinHandle<io::Result<()>>, CancellationToken
 /// * `cancel_token` - The cancellation token to use
 fn start_stdin_task(
     tx: Sender<Event>,
-    mut rx: Receiver<bool>,
     cancel_token: CancellationToken,
 ) -> JoinHandle<io::Result<()>> {
     let mut stdin_reader = tokio::io::BufReader::new(tokio::io::stdin());
@@ -167,20 +157,8 @@ fn start_stdin_task(
                     if let Err(e) = tx.send(Event::StdinMessage(buf)).await {
                         error!("Error sending message from stdin task: {}", e);
                     }
-                    // TODO: once exit has the ability to shutdown the server, this can be removed in favor of just breaking the loop
                     if is_exit_command {
-                        match rx.recv().await {
-                            Some(v) => {
-                                if v {
-                                    debug!("stdin task received exit signal");
-                                    break;
-                                }
-                            },
-                            None => {
-                                error!("stdin cancellation channel prematurely closed!");
-                                break;
-                            }
-                        }
+                        break;
                     }
                 },
                 _ = cancel_token.cancelled() => {
