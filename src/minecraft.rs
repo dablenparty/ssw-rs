@@ -11,7 +11,7 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt},
     process::{ChildStdin, ChildStdout},
     select,
-    sync::mpsc::{Receiver, Sender},
+    sync::mpsc::{error::SendError, Receiver, Sender},
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
@@ -122,8 +122,8 @@ impl MinecraftServer {
     }
 
     /// Stop the server if it is running
-    pub async fn stop(&self) {
-        self.send_command("stop".to_string()).await;
+    pub async fn stop(&self) -> Result<(), SendError<String>> {
+        self.send_command("stop".to_string()).await
     }
 
     /// Send a command to the server if it is running
@@ -131,12 +131,11 @@ impl MinecraftServer {
     /// # Arguments
     ///
     /// * `command` - The command to send to the server
-    pub async fn send_command(&self, command: String) {
-        //? TODO: propagate error
+    pub async fn send_command(&self, command: String) -> Result<(), SendError<String>> {
         if let Some(ref sender) = self.server_stdin_sender {
-            if let Err(e) = sender.send(command).await {
-                error!("Failed to send command to server: {}", e);
-            }
+            sender.send(command).await
+        } else {
+            Ok(())
         }
     }
 
