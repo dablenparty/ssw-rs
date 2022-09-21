@@ -71,7 +71,9 @@ async fn main() -> std::io::Result<()> {
                             || current_server_status == minecraft::MCServerState::Starting
                         {
                             info!("Server is currently running, stopping it first");
-                            mc_server.stop().await;
+                            if let Err(e) = mc_server.stop().await {
+                                error!("Failed to send stop command to server: {:?}", e);
+                            }
                             if let Err(e) = mc_server.wait_for_exit().await {
                                 error!("Failed to wait for server to exit: {}", e);
                             }
@@ -84,7 +86,9 @@ async fn main() -> std::io::Result<()> {
                     }
                     _ => {
                         if current_server_status == minecraft::MCServerState::Running {
-                            mc_server.send_command(command.to_string()).await;
+                            if let Err(e) = mc_server.send_command(command.to_string()).await {
+                                error!("Failed to send command to server: {:?}", e);
+                            }
                         } else {
                             error!("Unknown command: {}", command);
                         }
@@ -151,6 +155,7 @@ fn start_stdin_task(
                     let n = n?;
                     debug!("Read {} bytes from stdin", n);
                     if n == 0 {
+                        warn!("Stdin closed, no more input will be accepted");
                         break;
                     }
                     let is_exit_command = buf.trim() == EXIT_COMMAND;
