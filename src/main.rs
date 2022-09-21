@@ -90,7 +90,7 @@ async fn main() -> std::io::Result<()> {
                         break;
                     }
                     "help" if current_server_status != minecraft::MCServerState::Running => {
-                        print_help()
+                        print_help();
                     }
                     _ => {
                         if current_server_status == minecraft::MCServerState::Running {
