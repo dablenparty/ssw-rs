@@ -12,7 +12,7 @@ use std::{
 
 use chrono::{DateTime, Local};
 use flate2::{Compression, GzBuilder};
-use log::{debug, error, info, LevelFilter};
+use log::{debug, error, info, warn, LevelFilter};
 use simplelog::{
     format_description, ColorChoice, CombinedLogger, TermLogger, TerminalMode, ThreadLogMode,
     WriteLogger,
@@ -52,7 +52,6 @@ async fn main() -> std::io::Result<()> {
     let (stdin_tx, stdin_rx) = tokio::sync::mpsc::channel::<bool>(1);
     //? separate cancel token
     let stdin_handle = start_stdin_task(event_tx.clone(), stdin_rx, proxy_cancel_token.clone());
-    // TODO: handle commands & errors properly without propagating them
     loop {
         let event = event_rx.recv().await;
         if event.is_none() {
@@ -67,9 +66,11 @@ async fn main() -> std::io::Result<()> {
                 match command {
                     "start" => {
                         if current_server_status == minecraft::MCServerState::Stopped {
-                            mc_server.run().await?;
+                            if let Err(e) = mc_server.run().await {
+                                error!("Failed to start server: {:?}", e);
+                            }
                         } else {
-                            info!("Server is already running");
+                            warn!("Server is already running");
                         }
                     }
                     EXIT_COMMAND => {
@@ -82,8 +83,6 @@ async fn main() -> std::io::Result<()> {
                                 error!("Failed to wait for server to exit: {}", e);
                             }
                         }
-                        // no need to check for running server, this branch only executes if the server is stopped
-                        // TODO: move this match up and allow exit to shutdown the server if it's running
                         proxy_cancel_token.cancel();
                         if let Err(e) = stdin_tx.send(true).await {
                             error!("Failed to send exit signal to stdin task: {:?}", e);
@@ -112,9 +111,9 @@ async fn main() -> std::io::Result<()> {
 /// Prints the SSW help message to the console
 fn print_help() {
     info!("Available commands:");
-    info!("    start - start the server");
-    info!("    {} - exit ssw", EXIT_COMMAND);
-    info!("    help - show this help message");
+    info!("  start - start the server");
+    info!("  {} - exit ssw", EXIT_COMMAND);
+    info!("  help - show this help message");
 }
 
 /// Starts the proxy task and returns a handle to it along with its cancellation token
