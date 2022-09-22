@@ -119,7 +119,7 @@ fn print_help() {
 /// * `port` - The port to listen on
 ///
 /// returns: `(JoinHandle<io::Result<()>>, CancellationToken)`
-fn start_proxy_task(port: u32) -> (JoinHandle<io::Result<()>>, CancellationToken) {
+fn start_proxy_task(port: u16) -> (JoinHandle<io::Result<()>>, CancellationToken) {
     let token = CancellationToken::new();
     let cloned_token = token.clone();
     let handle = tokio::spawn(async move {

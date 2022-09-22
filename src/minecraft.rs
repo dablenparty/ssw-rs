@@ -38,7 +38,7 @@ pub struct SswConfig {
     pub memory_in_gb: f32,
     pub restart_timeout: f32,
     pub shutdown_timeout: f32,
-    pub ssw_port: u32,
+    pub ssw_port: u16,
     pub mc_version: Option<String>,
     pub required_java_version: String,
     pub extra_args: Vec<String>,

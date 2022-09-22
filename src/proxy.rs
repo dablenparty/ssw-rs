@@ -26,7 +26,7 @@ enum ConnectionManagerEvent {
 ///
 /// * `ssw_port` - The port for the proxy to listen on
 /// * `cancellation_token` - The cancellation token to use
-pub async fn run_proxy(ssw_port: u32, cancellation_token: CancellationToken) -> io::Result<()> {
+pub async fn run_proxy(ssw_port: u16, cancellation_token: CancellationToken) -> io::Result<()> {
     info!("Starting proxy on port {}", ssw_port);
     let addr = format!("{}:{}", "0.0.0.0", ssw_port);
 
