@@ -16,7 +16,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::util::{async_create_dir_if_not_exists, pipe_readable_to_stdout};
+use crate::util::async_create_dir_if_not_exists;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
