@@ -10,7 +10,7 @@ use std::{
     path::PathBuf,
 };
 
-use crate::minecraft::MinecraftServer;
+use crate::minecraft::{MinecraftServer, DEFAULT_MC_PORT};
 use chrono::{DateTime, Local};
 use flate2::{Compression, GzBuilder};
 use log::{debug, error, info, warn, LevelFilter};
