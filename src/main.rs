@@ -142,7 +142,7 @@ fn print_help() {
 ///
 /// * `port` - The port to listen on
 ///
-/// returns: `(JoinHandle<io::Result<()>>, CancellationToken)`
+/// returns: `(JoinHandle<()>, CancellationToken)`
 fn start_proxy_task(port: u16) -> (JoinHandle<()>, CancellationToken) {
     let token = CancellationToken::new();
     let cloned_token = token.clone();
@@ -151,12 +151,16 @@ fn start_proxy_task(port: u16) -> (JoinHandle<()>, CancellationToken) {
         select! {
             r = run_proxy(port, inner_clone) => {
                 if let Err(e) = r {
-                    error!("Proxy task failed: {:?}", e);
+                    if e.kind() == io::ErrorKind::AddrInUse {
+                        error!("Failed to start proxy: port {} is already in use", port);
+                        error!("Make sure that no other server is running on this port");
+                    } else {
+                        error!("Failed to start proxy: {:?}", e);
+                    }
                 }
             },
             _ = cloned_token.cancelled() => {
                 debug!("Proxy task cancelled");
-                return;
             }
         }
     });
@@ -169,6 +173,8 @@ fn start_proxy_task(port: u16) -> (JoinHandle<()>, CancellationToken) {
 ///
 /// * `tx` - The channel to send the messages through
 /// * `cancel_token` - The cancellation token to use
+///
+/// returns: `JoinHandle<()>`
 fn start_stdin_task(tx: Sender<Event>, cancel_token: CancellationToken) -> JoinHandle<()> {
     let mut stdin_reader = tokio::io::BufReader::new(tokio::io::stdin());
     tokio::spawn(async move {
