@@ -10,6 +10,7 @@ use std::{
     path::PathBuf,
 };
 
+use crate::minecraft::MinecraftServer;
 use chrono::{DateTime, Local};
 use flate2::{Compression, GzBuilder};
 use log::{debug, error, info, warn, LevelFilter};
@@ -17,6 +18,7 @@ use simplelog::{
     format_description, ColorChoice, CombinedLogger, TermLogger, TerminalMode, ThreadLogMode,
     WriteLogger,
 };
+use tokio::sync::mpsc::Receiver;
 use tokio::{io::AsyncBufReadExt, select, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use util::{create_dir_if_not_exists, get_exe_parent_dir};
@@ -45,6 +47,28 @@ async fn main() -> std::io::Result<()> {
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<Event>(100);
     //? separate cancel token
     let stdin_handle = start_stdin_task(event_tx.clone(), proxy_cancel_token.clone());
+    run_ssw_event_loop(&mut mc_server, proxy_cancel_token, &mut event_rx).await;
+    stdin_handle.await??;
+    proxy_handle.await??;
+    Ok(())
+}
+
+/// Runs the main event loop for SSW. This loop handles all events that are sent to the event channel.
+///
+/// All errors are handled internally to allow for proper cleanup if one of the tasks fails.
+///
+/// # Arguments
+///
+/// * `mc_server`: the Minecraft server instance
+/// * `proxy_cancel_token`: the cancel token for the proxy task
+/// * `event_rx`: the event channel receiver
+///
+/// returns: `()`
+async fn run_ssw_event_loop(
+    mc_server: &mut MinecraftServer,
+    proxy_cancel_token: CancellationToken,
+    event_rx: &mut Receiver<Event>,
+) {
     loop {
         let event = event_rx.recv().await;
         if event.is_none() {
@@ -52,7 +76,10 @@ async fn main() -> std::io::Result<()> {
             break;
         }
         let event = event.unwrap();
-        let current_server_status = *mc_server.status().lock().unwrap();
+        let current_server_status = *mc_server
+            .status()
+            .lock()
+            .expect("Failed to lock on server status");
         match event {
             Event::StdinMessage(msg) => {
                 let command = msg.trim();
@@ -97,9 +124,6 @@ async fn main() -> std::io::Result<()> {
             }
         }
     }
-    stdin_handle.await??;
-    proxy_handle.await??;
-    Ok(())
 }
 
 /// Prints the SSW help message to the console
