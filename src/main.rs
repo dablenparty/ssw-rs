@@ -86,7 +86,7 @@ async fn run_ssw_event_loop(
             .expect("Failed to lock on server status");
         match event {
             Event::StdinMessage(msg) => {
-                let command_with_args: Vec<&str> = msg.trim().split_whitespace().collect();
+                let command_with_args: Vec<&str> = msg.split_whitespace().collect();
                 let command = command_with_args[0];
                 match command {
                     "start" => {
@@ -131,7 +131,7 @@ async fn run_ssw_event_loop(
                             let port = mc_server
                                 .get_property("server-port")
                                 .map_or(DEFAULT_MC_PORT.into(), |v| {
-                                    v.as_u64().unwrap_or(DEFAULT_MC_PORT.into())
+                                    v.as_u64().unwrap_or_else(|| DEFAULT_MC_PORT.into())
                                 });
                             info!("Current MC port: {}", port);
                         }
@@ -154,7 +154,7 @@ async fn run_ssw_event_loop(
                 let port: u16 = mc_server
                     .get_property("server-port")
                     .map_or(DEFAULT_MC_PORT.into(), |v| {
-                        v.as_u64().unwrap_or(DEFAULT_MC_PORT.into())
+                        v.as_u64().unwrap_or_else(|| DEFAULT_MC_PORT.into())
                     })
                     .try_into()
                     .unwrap_or_else(|_| {
