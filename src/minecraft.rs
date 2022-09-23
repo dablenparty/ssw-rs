@@ -52,7 +52,7 @@ impl Default for SswConfig {
             memory_in_gb: 1.0,
             restart_timeout: 12.0,
             shutdown_timeout: 5.0,
-            ssw_port: 25565,
+            ssw_port: 25566,
             mc_version: None,
             required_java_version: "17.0".to_string(),
             extra_args: Vec::new(),
@@ -104,6 +104,7 @@ impl SswConfig {
     }
 }
 
+pub const DEFAULT_MC_PORT: u16 = 25565;
 type MCServerProperties = HashMap<String, Value>;
 
 pub struct MinecraftServer {
@@ -125,12 +126,13 @@ impl MinecraftServer {
     ///
     /// * `jar_path` - The path to the server jar file
     pub async fn new(jar_path: PathBuf) -> Self {
+        let config_path = jar_path.with_file_name(".ssw").join("ssw.json");
         let mut inst = Self {
             jar_path,
             state: Arc::new(Mutex::new(MCServerState::Stopped)),
             exit_handler: None,
             server_stdin_sender: None,
-            ssw_config: SswConfig::default(),
+            ssw_config: SswConfig::new(&config_path).await.unwrap_or_default(),
             properties: None,
         };
         inst.load_properties().await;
