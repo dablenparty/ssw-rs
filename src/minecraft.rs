@@ -200,17 +200,7 @@ impl MinecraftServer {
         // TODO: check java version
         info!("Checking Java version...");
         info!("Loading SSW config...");
-        let config_path = self
-            .jar_path
-            .parent()
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    "Could not get parent directory of jar file",
-                )
-            })?
-            .join(".ssw")
-            .join("ssw.json");
+        let config_path = self.jar_path.with_file_name(".ssw").join("ssw.json");
         self.ssw_config = SswConfig::new(&config_path).await.unwrap_or_else(|e| {
             error!("Failed to load SSW config: {}", e);
             error!("Using default SSW config");
@@ -218,29 +208,8 @@ impl MinecraftServer {
         });
         info!("SSW config loaded: {:?}", self.ssw_config);
         self.load_properties().await;
-        debug!("Validating ports");
         if let Some(port) = self.get_property("server-port") {
-            let mut return_err = false;
-            let _: u16 = port.as_u64().map_or_else(
-                || {
-                    debug!("server.properties server-port does not exist");
-                    DEFAULT_MC_PORT
-                },
-                |v| {
-                    v.try_into().unwrap_or_else(|_| {
-                        warn!("Invalid Minecraft server port: {}", port);
-                        warn!("Valid ports are in the range 0-65535");
-                        if self.ssw_config.ssw_port == DEFAULT_MC_PORT {
-                            error!("The SSW port is also the default Minecraft port");
-                            error!("Because there was an error with the server port, there will be a feedback loop if anyone tries to connect");
-                            error!("Please change the server port in server.properties to fix this");
-                        }
-                        return_err = true;
-                        0
-                    })
-                },
-            );
-            if return_err {
+            if !validate_port(self.ssw_config.ssw_port, port) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "Invalid Minecraft server port",
@@ -350,6 +319,38 @@ impl MinecraftServer {
     pub fn status(&self) -> Arc<Mutex<MCServerState>> {
         self.state.clone()
     }
+}
+
+/// Validate that the Minecraft server port is a valid `u16` and the SSW port is not the same as the Minecraft server port.
+///
+/// # Arguments:
+///
+/// * `ssw_port` - The SSW port.
+/// * `server_port` - The Minecraft server port.
+///
+/// returns: `bool`
+fn validate_port(ssw_port: u16, server_port: &Value) -> bool {
+    let mut port_is_valid = true;
+    let _: u16 = server_port.as_u64().map_or_else(
+        || {
+            debug!("server.properties server-port does not exist");
+            DEFAULT_MC_PORT
+        },
+        |v| {
+            v.try_into().unwrap_or_else(|_| {
+                warn!("Invalid Minecraft server port: {}", server_port);
+                warn!("Valid ports are in the range 0-65535");
+                if ssw_port == DEFAULT_MC_PORT {
+                    error!("The SSW port ({}) is the same as the default Minecraft port", ssw_port);
+                    error!("Because there was an error with the server port, there will be a feedback loop if anyone tries to connect");
+                    error!("Please change the server port in server.properties to fix this");
+                }
+                port_is_valid = false;
+                0
+            })
+        },
+    );
+    port_is_valid
 }
 
 /// Load the properties file from the given path.
