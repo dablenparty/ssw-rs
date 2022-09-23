@@ -128,10 +128,33 @@ async fn run_ssw_event_loop(
 
 /// Prints the SSW help message to the console
 fn print_help() {
-    info!("Available commands:");
-    info!("  start - start the server");
-    info!("  {} - exit ssw", EXIT_COMMAND);
-    info!("  help - show this help message");
+    // padding before the command name
+    const COMMAND_PADDING: usize = 2;
+    let commands = vec![
+        ("help", "prints this help message"),
+        ("start", "starts the Minecraft server"),
+        (EXIT_COMMAND, "stops the Minecraft server and exits SSW"),
+        ("ssw-port", "show or set the SSW port"),
+        ("mc-port", "show or set the Minecraft server port"),
+    ];
+    // safe to unwrap as this iterator should never be empty
+    let max_command_len = commands
+        .iter()
+        .map(|(command, _)| command.len())
+        .max()
+        .unwrap();
+    info!("Available SSW commands:");
+    for command in commands {
+        let padding = " ".repeat(COMMAND_PADDING);
+        let help_string = format!(
+            "{}{:width$}{}",
+            padding,
+            command.0,
+            command.1,
+            width = max_command_len + 2
+        );
+        info!("{}", help_string);
+    }
 }
 
 /// Starts the proxy task and returns a handle to it along with its cancellation token
