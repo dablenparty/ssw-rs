@@ -125,24 +125,16 @@ impl MinecraftServer {
     ///
     /// * `jar_path` - The path to the server jar file
     pub async fn new(jar_path: PathBuf) -> Self {
-        // load the properties file or assign None
-        let properties = load_properties(&jar_path.with_file_name("server.properties"))
-            .await
-            .map_or_else(
-                |e| {
-                    warn!("Failed to load server.properties: {}", e);
-                    None
-                },
-                Some,
-            );
-        Self {
+        let mut inst = Self {
             jar_path,
             state: Arc::new(Mutex::new(MCServerState::Stopped)),
             exit_handler: None,
             server_stdin_sender: None,
             ssw_config: SswConfig::default(),
-            properties,
-        }
+            properties: None,
+        };
+        inst.load_properties().await;
+        inst
     }
 
     /// Stop the server if it is running
@@ -160,6 +152,27 @@ impl MinecraftServer {
             sender.send(command).await
         } else {
             Ok(())
+        }
+    }
+
+    /// Load the `server.properties` file for this server.
+    ///
+    /// If the properties have been previously loaded and fail to load again, the previous properties will be kept.
+    pub async fn load_properties(&mut self) {
+        // load the properties file if it exists or assign None
+        let new_props = load_properties(&self.jar_path.with_file_name("server.properties"))
+            .await
+            .map_or_else(
+                |e| {
+                    warn!("Failed to load server.properties: {}", e);
+                    None
+                },
+                Some,
+            );
+        if new_props.is_some() || self.properties.is_none() {
+            self.properties = new_props;
+        } else {
+            warn!("Failed to load server.properties, using existing properties");
         }
     }
 
@@ -198,10 +211,7 @@ impl MinecraftServer {
             SswConfig::default()
         });
         info!("SSW config loaded: {:?}", self.ssw_config);
-        match load_properties(&self.jar_path.with_file_name("server.properties")).await {
-            Ok(props) => self.properties = Some(props),
-            Err(e) => warn!("Failed to load server.properties: {}", e),
-        }
+        self.load_properties().await;
         // TODO: patch Log4j
         let memory_in_mb = self.ssw_config.memory_in_gb * 1024.0;
         // truncation is intentional
