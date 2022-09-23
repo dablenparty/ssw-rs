@@ -62,6 +62,13 @@ pub async fn run_proxy(
         } else {
             rx.recv().await.unwrap_or(DEFAULT_MC_PORT)
         };
+        if mc_port == ssw_port {
+            warn!(
+                "MC port is the same as SSW port, ignoring connection from {}",
+                client_addr
+            );
+            continue;
+        }
         let tx_clone = connection_manager_tx.clone();
         let connection_token = cancellation_token.clone();
         let connection_handle = tokio::spawn(async move {
