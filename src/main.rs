@@ -41,10 +41,9 @@ async fn main() -> io::Result<()> {
     }
     // TODO: command line arg parser
     let path = std::env::args().nth(1).expect("Missing path to server jar");
-    let mut mc_server =
-        MinecraftServer::new(dunce::canonicalize(PathBuf::from(path))?).await;
     let cargo_version = env!("CARGO_PKG_VERSION");
     println!("SSW Console v{}", cargo_version);
+    let mut mc_server = MinecraftServer::new(dunce::canonicalize(PathBuf::from(path))?).await;
     let port = mc_server.ssw_config.ssw_port;
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<Event>(100);
     let (proxy_handle, proxy_cancel_token, proxy_tx) = start_proxy_task(port, event_tx.clone());
@@ -128,9 +127,12 @@ async fn run_ssw_event_loop(
                         if let Some(_arg) = command_with_args.get(1) {
                             // TODO: check if port is valid and assign it to the server properties file
                         } else {
+                            // this just reports the port that the server is using, it doesn't check validity
                             let port = mc_server
                                 .get_property("server-port")
-                                .map_or(25565, |v| v.as_u64().unwrap_or(25565));
+                                .map_or(DEFAULT_MC_PORT.into(), |v| {
+                                    v.as_u64().unwrap_or(DEFAULT_MC_PORT.into())
+                                });
                             info!("Current MC port: {}", port);
                         }
                     }
