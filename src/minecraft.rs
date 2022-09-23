@@ -132,7 +132,11 @@ impl MinecraftServer {
             state: Arc::new(Mutex::new(MCServerState::Stopped)),
             exit_handler: None,
             server_stdin_sender: None,
-            ssw_config: SswConfig::new(&config_path).await.unwrap_or_default(),
+            ssw_config: SswConfig::new(&config_path).await.unwrap_or_else(|e| {
+                error!("Failed to load SSW config: {}", e);
+                error!("Using default SSW config");
+                SswConfig::default()
+            }),
             properties: None,
         };
         inst.load_properties().await;
