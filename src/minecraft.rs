@@ -1,12 +1,14 @@
 use std::{
+    collections::HashMap,
     io::{self, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use regex::Regex;
 use serde::{de::Error, Deserialize, Serialize};
+use serde_json::Value;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt},
     process::{ChildStdin, ChildStdout},
@@ -102,22 +104,44 @@ impl SswConfig {
     }
 }
 
+type MCServerProperties = HashMap<String, Value>;
+
 pub struct MinecraftServer {
     state: Arc<Mutex<MCServerState>>,
     exit_handler: Option<JoinHandle<()>>,
     server_stdin_sender: Option<Sender<String>>,
     jar_path: PathBuf,
+    properties: Option<MCServerProperties>,
     pub ssw_config: SswConfig,
 }
 
 impl MinecraftServer {
-    pub fn new(jar_path: PathBuf) -> Self {
+    /// Creates a new `MinecraftServer` struct.
+    ///
+    /// This will not start the server, only prepare it. This involves checking
+    /// the jar file and loading the properties file if it exists.
+    ///
+    /// # Arguments
+    ///
+    /// * `jar_path` - The path to the server jar file
+    pub async fn new(jar_path: PathBuf) -> Self {
+        // load the properties file or assign None
+        let properties = load_properties(&jar_path.with_file_name("server.properties"))
+            .await
+            .map_or_else(
+                |e| {
+                    warn!("Failed to load server.properties: {}", e);
+                    None
+                },
+                Some,
+            );
         Self {
             jar_path,
             state: Arc::new(Mutex::new(MCServerState::Stopped)),
             exit_handler: None,
             server_stdin_sender: None,
             ssw_config: SswConfig::default(),
+            properties,
         }
     }
 
@@ -137,6 +161,15 @@ impl MinecraftServer {
         } else {
             Ok(())
         }
+    }
+
+    /// Get a reference to a property from server.properties
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key of the property to get
+    pub fn get_property(&self, key: &str) -> Option<&Value> {
+        self.properties.as_ref()?.get(key)
     }
 
     /// Run the Minecraft server process
@@ -165,7 +198,10 @@ impl MinecraftServer {
             SswConfig::default()
         });
         info!("SSW config loaded: {:?}", self.ssw_config);
-        // TODO: load server.properties
+        match load_properties(&self.jar_path.with_file_name("server.properties")).await {
+            Ok(props) => self.properties = Some(props),
+            Err(e) => warn!("Failed to load server.properties: {}", e),
+        }
         // TODO: patch Log4j
         let memory_in_mb = self.ssw_config.memory_in_gb * 1024.0;
         // truncation is intentional
@@ -177,7 +213,10 @@ impl MinecraftServer {
             memory_arg.as_str(),
             "-jar",
             self.jar_path.to_str().ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "Invalid unicode found in path")
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Invalid unicode found in JAR path",
+                )
             })?,
             "nogui",
         ];
@@ -266,6 +305,41 @@ impl MinecraftServer {
     pub fn status(&self) -> Arc<Mutex<MCServerState>> {
         self.state.clone()
     }
+}
+
+/// Load the properties file from the given path.
+///
+/// Properties files are expected to be in the format `key=value`
+/// with comments starting with `#`.
+///
+/// # Arguments:
+///
+/// * `path` - The path to the properties file.
+///
+/// # Errors:
+///
+/// An error is returned if the file could not be read. One is _not_ returned if the file is not
+/// in the incorrect format. Instead, the properties are returned with only the properties that
+/// were successfully parsed.
+async fn load_properties(path: &Path) -> io::Result<MCServerProperties> {
+    let properties_string = tokio::fs::read_to_string(path).await?;
+    let new_props = properties_string
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let mut split = line.splitn(2, '=');
+            let key = split.next()?;
+            let value = split
+                .next()
+                .map_or_else(|| Ok(Value::Null), serde_json::from_str)
+                .unwrap_or(Value::Null);
+            Some((key.to_string(), value))
+        })
+        .collect::<MCServerProperties>();
+    Ok(new_props)
 }
 
 /// Waits for the server process to exit, cancels all pipes, and set the server state to `Stopped`.

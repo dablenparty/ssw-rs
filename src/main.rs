@@ -39,7 +39,8 @@ async fn main() -> std::io::Result<()> {
     }
     // TODO: command line arg parser
     let path = std::env::args().nth(1).expect("Missing path to server jar");
-    let mut mc_server = minecraft::MinecraftServer::new(dunce::canonicalize(PathBuf::from(path))?);
+    let mut mc_server =
+        minecraft::MinecraftServer::new(dunce::canonicalize(PathBuf::from(path))?).await;
     let cargo_version = env!("CARGO_PKG_VERSION");
     println!("SSW Console v{}", cargo_version);
     let port = mc_server.ssw_config.ssw_port;
@@ -123,8 +124,10 @@ async fn run_ssw_event_loop(
                         if let Some(_arg) = command_with_args.get(1) {
                             // TODO: check if port is valid and assign it to the server properties file
                         } else {
-                            // TODO: get port from server properties
-                            info!("Current MC port: {}", "25566");
+                            let port = mc_server
+                                .get_property("server-port")
+                                .map_or(25565, |v| v.as_u64().unwrap_or(25565));
+                            info!("Current MC port: {}", port);
                         }
                     }
                     _ => {
