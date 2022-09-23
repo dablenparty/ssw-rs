@@ -214,6 +214,35 @@ impl MinecraftServer {
         });
         info!("SSW config loaded: {:?}", self.ssw_config);
         self.load_properties().await;
+        debug!("Validating ports");
+        if let Some(port) = self.get_property("server-port") {
+            let mut return_err = false;
+            let _: u16 = port.as_u64().map_or_else(
+                || {
+                    debug!("server.properties server-port does not exist");
+                    DEFAULT_MC_PORT
+                },
+                |v| {
+                    v.try_into().unwrap_or_else(|_| {
+                        warn!("Invalid Minecraft server port: {}", port);
+                        warn!("Valid ports are in the range 0-65535");
+                        if self.ssw_config.ssw_port == DEFAULT_MC_PORT {
+                            error!("The SSW port is also the default Minecraft port");
+                            error!("Because there was an error with the server port, there will be a feedback loop if anyone tries to connect");
+                            error!("Please change the server port in server.properties to fix this");
+                        }
+                        return_err = true;
+                        0
+                    })
+                },
+            );
+            if return_err {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Invalid Minecraft server port",
+                ));
+            }
+        }
         // TODO: patch Log4j
         let memory_in_mb = self.ssw_config.memory_in_gb * 1024.0;
         // truncation is intentional
