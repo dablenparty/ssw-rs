@@ -82,7 +82,8 @@ async fn run_ssw_event_loop(
             .expect("Failed to lock on server status");
         match event {
             Event::StdinMessage(msg) => {
-                let command = msg.trim();
+                let command_with_args: Vec<&str> = msg.split_whitespace().collect();
+                let command = command_with_args[0].trim();
                 match command {
                     "start" => {
                         if current_server_status == minecraft::MCServerState::Stopped {
@@ -110,6 +111,21 @@ async fn run_ssw_event_loop(
                     }
                     "help" if current_server_status != minecraft::MCServerState::Running => {
                         print_help();
+                    }
+                    "ssw-port" => {
+                        if let Some(_arg) = command_with_args.get(1) {
+                            // TODO: check if port is valid and assign it to the servers ssw config
+                        } else {
+                            info!("Current SSW port: {}", mc_server.ssw_config.ssw_port);
+                        }
+                    }
+                    "mc-port" => {
+                        if let Some(_arg) = command_with_args.get(1) {
+                            // TODO: check if port is valid and assign it to the server properties file
+                        } else {
+                            // TODO: get port from server properties
+                            info!("Current MC port: {}", "25566");
+                        }
                     }
                     _ => {
                         if current_server_status == minecraft::MCServerState::Running {
