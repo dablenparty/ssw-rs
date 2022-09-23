@@ -136,6 +136,8 @@ async fn run_ssw_event_loop(
                     }
                     _ => {
                         if current_server_status == minecraft::MCServerState::Running {
+                            // put it all back together and send it to the server
+                            let command = command_with_args.join(" ");
                             if let Err(e) = mc_server.send_command(command.to_string()).await {
                                 error!("Failed to send command to server: {:?}", e);
                             }
