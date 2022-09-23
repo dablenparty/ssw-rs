@@ -13,6 +13,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+use crate::minecraft::DEFAULT_MC_PORT;
 use crate::Event;
 
 enum ConnectionManagerEvent {
@@ -56,10 +57,10 @@ pub async fn run_proxy(
 
         let mc_port = if let Err(e) = tx.send(Event::McPortRequest).await {
             error!("Failed to request MC port: {}", e);
-            error!("Using default port 25565");
-            25565
+            error!("Using default port {}", DEFAULT_MC_PORT);
+            DEFAULT_MC_PORT
         } else {
-            rx.recv().await.unwrap_or(25565)
+            rx.recv().await.unwrap_or(DEFAULT_MC_PORT)
         };
         let tx_clone = connection_manager_tx.clone();
         let connection_token = cancellation_token.clone();

@@ -148,10 +148,17 @@ async fn run_ssw_event_loop(
                 }
             }
             Event::McPortRequest => {
-                let port = mc_server
+                // this really shouldn't be a problem, but just in case
+                let port: u16 = mc_server
                     .get_property("server-port")
-                    .map_or(25565, |v| v.as_u64().unwrap_or(25565))
-                    as u16;
+                    .map_or(DEFAULT_MC_PORT.into(), |v| {
+                        v.as_u64().unwrap_or(DEFAULT_MC_PORT.into())
+                    })
+                    .try_into()
+                    .unwrap_or_else(|_| {
+                        error!("The server port is not a valid TCP port. Valid ports are in the range 0-65535");
+                        DEFAULT_MC_PORT
+                    });
                 if let Err(e) = proxy_tx.send(port).await {
                     error!("Failed to send port to proxy: {:?}", e);
                 }
