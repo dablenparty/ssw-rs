@@ -25,8 +25,10 @@ use util::{create_dir_if_not_exists, get_exe_parent_dir};
 
 use crate::proxy::run_proxy;
 
-enum Event {
+#[derive(Debug)]
+pub enum Event {
     StdinMessage(String),
+    McPortRequest,
 }
 
 const EXIT_COMMAND: &str = "exit";
@@ -44,11 +46,11 @@ async fn main() -> std::io::Result<()> {
     let cargo_version = env!("CARGO_PKG_VERSION");
     println!("SSW Console v{}", cargo_version);
     let port = mc_server.ssw_config.ssw_port;
-    let (proxy_handle, proxy_cancel_token) = start_proxy_task(port);
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<Event>(100);
+    let (proxy_handle, proxy_cancel_token, proxy_tx) = start_proxy_task(port, event_tx.clone());
     //? separate cancel token
     let stdin_handle = start_stdin_task(event_tx.clone(), proxy_cancel_token.clone());
-    run_ssw_event_loop(&mut mc_server, proxy_cancel_token, &mut event_rx).await;
+    run_ssw_event_loop(&mut mc_server, proxy_cancel_token, &mut event_rx, proxy_tx).await;
     stdin_handle.await?;
     proxy_handle.await?;
     Ok(())
@@ -69,6 +71,7 @@ async fn run_ssw_event_loop(
     mc_server: &mut MinecraftServer,
     proxy_cancel_token: CancellationToken,
     event_rx: &mut Receiver<Event>,
+    proxy_tx: Sender<u16>,
 ) {
     loop {
         let event = event_rx.recv().await;
@@ -77,6 +80,7 @@ async fn run_ssw_event_loop(
             break;
         }
         let event = event.unwrap();
+        debug!("Received event: {:?}", event);
         let current_server_status = *mc_server
             .status()
             .lock()
@@ -141,6 +145,15 @@ async fn run_ssw_event_loop(
                     }
                 }
             }
+            Event::McPortRequest => {
+                let port = mc_server
+                    .get_property("server-port")
+                    .map_or(25565, |v| v.as_u64().unwrap_or(25565))
+                    as u16;
+                if let Err(e) = proxy_tx.send(port).await {
+                    error!("Failed to send port to proxy: {:?}", e);
+                }
+            }
         }
     }
 }
@@ -183,15 +196,20 @@ fn print_help() {
 /// # Arguments
 ///
 /// * `port` - The port to listen on
+/// * `event_tx` - The event channel sender
 ///
 /// returns: `(JoinHandle<()>, CancellationToken)`
-fn start_proxy_task(port: u16) -> (JoinHandle<()>, CancellationToken) {
+fn start_proxy_task(
+    port: u16,
+    event_tx: Sender<Event>,
+) -> (JoinHandle<()>, CancellationToken, Sender<u16>) {
     let token = CancellationToken::new();
     let cloned_token = token.clone();
+    let (proxy_tx, proxy_rx) = tokio::sync::mpsc::channel::<u16>(100);
     let handle = tokio::spawn(async move {
         let inner_clone = cloned_token.clone();
         select! {
-            r = run_proxy(port, inner_clone) => {
+            r = run_proxy(port, inner_clone, event_tx, proxy_rx) => {
                 if let Err(e) = r {
                     if e.kind() == io::ErrorKind::AddrInUse {
                         error!("Failed to start proxy: port {} is already in use", port);
@@ -206,7 +224,7 @@ fn start_proxy_task(port: u16) -> (JoinHandle<()>, CancellationToken) {
             }
         }
     });
-    (handle, token)
+    (handle, token, proxy_tx)
 }
 
 /// Start the task that reads from stdin and sends the messages through the given channel

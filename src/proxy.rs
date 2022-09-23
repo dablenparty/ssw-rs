@@ -8,9 +8,12 @@ use log::{debug, error, info, warn};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
+    sync::mpsc::{Receiver, Sender},
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
+
+use crate::Event;
 
 enum ConnectionManagerEvent {
     Connected(SocketAddr, JoinHandle<()>),
@@ -26,7 +29,12 @@ enum ConnectionManagerEvent {
 ///
 /// * `ssw_port` - The port for the proxy to listen on
 /// * `cancellation_token` - The cancellation token to use
-pub async fn run_proxy(ssw_port: u16, cancellation_token: CancellationToken) -> io::Result<()> {
+pub async fn run_proxy(
+    ssw_port: u16,
+    cancellation_token: CancellationToken,
+    tx: Sender<Event>,
+    mut rx: Receiver<u16>,
+) -> io::Result<()> {
     info!("Starting proxy on port {}", ssw_port);
     // TODO: optional command line arg for IP
     let addr = format!("{}:{}", "0.0.0.0", ssw_port);
@@ -45,11 +53,19 @@ pub async fn run_proxy(ssw_port: u16, cancellation_token: CancellationToken) -> 
     loop {
         let (client, client_addr) = listener.accept().await?;
         debug!("Accepted connection from {}", client_addr);
+
+        let mc_port = if let Err(e) = tx.send(Event::McPortRequest).await {
+            error!("Failed to request MC port: {}", e);
+            error!("Using default port 25565");
+            25565
+        } else {
+            rx.recv().await.unwrap_or(25565)
+        };
         let tx_clone = connection_manager_tx.clone();
         let connection_token = cancellation_token.clone();
         let connection_handle = tokio::spawn(async move {
             select! {
-                r = connection_handler(client) => {
+                r = connection_handler(client, mc_port) => {
                     if let Err(e) = r {
                         warn!("Error handling connection: {}", e);
                     } else {
@@ -139,9 +155,8 @@ async fn connection_manager(
 /// * `client_stream` - The `TcpStream` from the client.
 ///
 /// returns: `io::Result<()>`
-async fn connection_handler(mut client_stream: TcpStream) -> io::Result<()> {
-    // TODO: get port from server
-    let mut server_stream = TcpStream::connect("127.0.0.1:25566").await?;
+async fn connection_handler(mut client_stream: TcpStream, mc_port: u16) -> io::Result<()> {
+    let mut server_stream = TcpStream::connect(format!("127.0.0.1:{}", mc_port)).await?;
     // I'm upset I didn't find this sooner. This function solved almost all performance issues with
     // the proxy and passing TCP packets between the client and server.
     tokio::io::copy_bidirectional(&mut client_stream, &mut server_stream).await?;
