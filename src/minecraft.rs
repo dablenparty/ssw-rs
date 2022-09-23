@@ -241,23 +241,7 @@ impl MinecraftServer {
 
         let status_clone = self.state.clone();
         let exit_handler_handle = tokio::spawn(async move {
-            match child.wait().await {
-                Ok(status) => debug!("Server exited with status {}", status),
-                Err(err) => error!("Error waiting for child process: {}", err),
-            }
-            // wait for all pipes to finish after cancelling them
-            for result in
-                futures::future::join_all(pipe_handles.into_iter().map(|(token, handle)| {
-                    token.cancel();
-                    handle
-                }))
-                .await
-            {
-                if let Err(err) = result {
-                    error!("Error waiting for pipe: {}", err);
-                }
-            }
-            *status_clone.lock().unwrap() = MCServerState::Stopped;
+            exit_handler(child, pipe_handles, status_clone).await;
         });
         self.exit_handler = Some(exit_handler_handle);
 
@@ -282,6 +266,37 @@ impl MinecraftServer {
     pub fn status(&self) -> Arc<Mutex<MCServerState>> {
         self.state.clone()
     }
+}
+
+/// Waits for the server process to exit, cancels all pipes, and set the server state to `Stopped`.
+/// This function should be spawned as a task.
+///
+/// # Arguments
+///
+/// * `server_child_proc` - The child process to wait for
+/// * `pipe_handles` - A vector of tuples containing a `CancellationToken` and a `JoinHandle` for each pipe
+/// * `status` - The `Arc<Mutex<MCServerState>>` to set to `Stopped` when the server exits
+async fn exit_handler(
+    mut server_child_proc: tokio::process::Child,
+    pipe_handles: Vec<(CancellationToken, JoinHandle<()>)>,
+    status_clone: Arc<Mutex<MCServerState>>,
+) {
+    match server_child_proc.wait().await {
+        Ok(status) => debug!("Server exited with status {}", status),
+        Err(err) => error!("Error waiting for child process: {}", err),
+    }
+    // wait for all pipes to finish after cancelling them
+    for result in futures::future::join_all(pipe_handles.into_iter().map(|(token, handle)| {
+        token.cancel();
+        handle
+    }))
+    .await
+    {
+        if let Err(err) = result {
+            error!("Error waiting for pipe: {}", err);
+        }
+    }
+    *status_clone.lock().unwrap() = MCServerState::Stopped;
 }
 
 /// Pipes the given `ChildStdout` to this process's stdout and monitors the server state.
