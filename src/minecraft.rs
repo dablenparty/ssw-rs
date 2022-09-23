@@ -206,12 +206,22 @@ impl MinecraftServer {
         });
         let mut pipe_handles = vec![(stdout_token, stdout_handle)];
 
-        let stderr = child.stderr.take().unwrap();
+        let mut stderr = child.stderr.take().unwrap();
         let stderr_token = CancellationToken::new();
         let cloned_token = stderr_token.clone();
         let stderr_handle = tokio::spawn(async move {
-            if let Err(err) = pipe_readable_to_stdout(stderr, cloned_token).await {
-                error!("Error reading from stderr: {}", err);
+            let mut stdout = tokio::io::stdout();
+            select! {
+                n = tokio::io::copy(&mut stderr, &mut stdout) => {
+                    if let Err(err) = n {
+                        error!("Error reading from stderr: {}", err);
+                    } else {
+                        debug!("Finished reading from stderr");
+                    }
+                }
+                _ = cloned_token.cancelled() => {
+                    debug!("stderr pipe cancelled");
+                }
             }
         });
         pipe_handles.push((stderr_token, stderr_handle));
@@ -295,6 +305,8 @@ async fn pipe_and_monitor_stdout(
 ) -> io::Result<()> {
     let ready_line_regex = Regex::new(r#"^(\[.+\]:?)+ Done (\(\d+\.\d+s\))?!"#).unwrap();
     let stopping_server_line_regex = Regex::new(r#"^(\[.+\]:?)+ Stopping the server"#).unwrap();
+    // doing this manually is slower than using tokio::io::copy, but it allows us to monitor the
+    // output and update the server state
     let buf = &mut String::new();
     let mut reader = tokio::io::BufReader::new(stdout);
     loop {
@@ -323,6 +335,7 @@ async fn pipe_and_monitor_stdout(
                 buf.clear();
             }
             _ = cancellation_token.cancelled() => {
+                debug!("stdout pipe cancelled");
                 break;
             }
         }
