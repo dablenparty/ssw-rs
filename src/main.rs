@@ -251,7 +251,6 @@ fn start_stdin_task(tx: Sender<Event>, cancel_token: CancellationToken) -> JoinH
                             break;
                         }
                     };
-                    debug!("Read {} bytes from stdin", n);
                     if n == 0 {
                         warn!("Stdin closed, no more input will be accepted");
                         break;
