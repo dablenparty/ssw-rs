@@ -28,46 +28,18 @@ enum ConnectionManagerEvent {
 /// * `cancellation_token` - The cancellation token to use
 pub async fn run_proxy(ssw_port: u16, cancellation_token: CancellationToken) -> io::Result<()> {
     info!("Starting proxy on port {}", ssw_port);
+    // TODO: optional command line arg for IP
     let addr = format!("{}:{}", "0.0.0.0", ssw_port);
 
     let listener = TcpListener::bind(&addr).await?;
     info!("Listening on {}", addr);
 
-    let (connection_manager_tx, mut connection_manager_rx) =
+    let (connection_manager_tx, connection_manager_rx) =
         tokio::sync::mpsc::channel::<ConnectionManagerEvent>(100);
     // TODO: when error handling is improved, shut this down properly
     let connection_manager_token = cancellation_token.clone();
     let _connection_manager_handle = tokio::spawn(async move {
-        // TODO: set initial capacity to server player limit
-        let mut connections: HashMap<SocketAddr, JoinHandle<()>> = HashMap::new();
-        loop {
-            select! {
-                msg = connection_manager_rx.recv() => {
-                    if let Some(event) = msg {
-                        match event {
-                            ConnectionManagerEvent::Connected(addr, handle) => {
-                                if let hash_map::Entry::Vacant(entry) = connections.entry(addr) {
-                                    entry.insert(handle);
-                                } else {
-                                    // this shouldn't happen
-                                    warn!("Connection already exists for {}", addr);
-                                }
-                            }
-                            ConnectionManagerEvent::Disconnected(addr) => {
-                                connections.remove(&addr);
-                            }
-                        }
-                        debug!("There are now {} connections", connections.len());
-                    } else {
-                        error!("Connection manager channel closed");
-                    }
-                },
-
-                _ = connection_manager_token.cancelled() => {
-                    break;
-                }
-            }
-        }
+        connection_manager(connection_manager_rx, connection_manager_token).await;
     });
 
     loop {
@@ -103,6 +75,58 @@ pub async fn run_proxy(ssw_port: u16, cancellation_token: CancellationToken) -> 
             .await
         {
             error!("Error sending connection event: {}", e);
+        }
+    }
+}
+
+/// Run the connection manager
+///
+/// This is responsible for keeping track of all connections and waiting for them to finish.
+/// There are a few expectations for this function:
+/// * It will be spawned as a task
+/// * It will be cancelled when the proxy is shutting down
+/// * It will be sent a `ConnectionManagerEvent` for every connection
+/// * The `JoinHandle` for each connection will be cancelled outside of this function
+///
+/// # Arguments
+///
+/// * `connection_manager_rx` - The channel to receive connection events from
+/// * `cancellation_token` - The cancellation token to use
+async fn connection_manager(
+    mut connection_manager_rx: tokio::sync::mpsc::Receiver<ConnectionManagerEvent>,
+    connection_manager_token: CancellationToken,
+) {
+    // TODO: set initial capacity to server player limit
+    let mut connections = HashMap::<SocketAddr, JoinHandle<()>>::new();
+    loop {
+        select! {
+            msg = connection_manager_rx.recv() => {
+                if let Some(event) = msg {
+                    match event {
+                        ConnectionManagerEvent::Connected(addr, handle) => {
+                            if let hash_map::Entry::Vacant(entry) = connections.entry(addr) {
+                                entry.insert(handle);
+                            } else {
+                                // this shouldn't happen
+                                warn!("Connection already exists for {}", addr);
+                            }
+                        }
+                        ConnectionManagerEvent::Disconnected(addr) => {
+                            connections.remove(&addr);
+                        }
+                    }
+                    debug!("There are now {} connections", connections.len());
+                } else {
+                    error!("Connection manager channel closed");
+                }
+            },
+
+            _ = connection_manager_token.cancelled() => {
+                info!("Waiting for all proxy connections to close");
+                futures::future::join_all(connections.drain().map(|(_, handle)| handle)).await;
+                info!("All proxy connections closed");
+                break;
+            }
         }
     }
 }
