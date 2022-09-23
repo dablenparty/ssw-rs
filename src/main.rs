@@ -34,7 +34,7 @@ pub enum Event {
 const EXIT_COMMAND: &str = "exit";
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> io::Result<()> {
     if let Err(e) = init_logger() {
         error!("failed to initialize logger: {:?}", e);
         std::process::exit(1);
@@ -42,7 +42,7 @@ async fn main() -> std::io::Result<()> {
     // TODO: command line arg parser
     let path = std::env::args().nth(1).expect("Missing path to server jar");
     let mut mc_server =
-        minecraft::MinecraftServer::new(dunce::canonicalize(PathBuf::from(path))?).await;
+        MinecraftServer::new(dunce::canonicalize(PathBuf::from(path))?).await;
     let cargo_version = env!("CARGO_PKG_VERSION");
     println!("SSW Console v{}", cargo_version);
     let port = mc_server.ssw_config.ssw_port;

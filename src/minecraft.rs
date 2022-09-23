@@ -402,8 +402,8 @@ async fn pipe_and_monitor_stdout(
     cancellation_token: CancellationToken,
     server_state: Arc<Mutex<MCServerState>>,
 ) -> io::Result<()> {
-    let ready_line_regex = Regex::new(r#"^(\[.+\]:?)+ Done (\(\d+\.\d+s\))?!"#).unwrap();
-    let stopping_server_line_regex = Regex::new(r#"^(\[.+\]:?)+ Stopping the server"#).unwrap();
+    let ready_line_regex = Regex::new(r#"^(\[.+]:?)+ Done (\(\d+\.\d+s\))?!"#).unwrap();
+    let stopping_server_line_regex = Regex::new(r#"^(\[.+]:?)+ Stopping the server"#).unwrap();
     // doing this manually is slower than using tokio::io::copy, but it allows us to monitor the
     // output and update the server state
     let buf = &mut String::new();

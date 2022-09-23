@@ -109,7 +109,7 @@ pub async fn run_proxy(
 /// * `connection_manager_rx` - The channel to receive connection events from
 /// * `cancellation_token` - The cancellation token to use
 async fn connection_manager(
-    mut connection_manager_rx: tokio::sync::mpsc::Receiver<ConnectionManagerEvent>,
+    mut connection_manager_rx: Receiver<ConnectionManagerEvent>,
     connection_manager_token: CancellationToken,
 ) {
     // TODO: set initial capacity to server player limit
