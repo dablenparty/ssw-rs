@@ -87,8 +87,8 @@ async fn run_ssw_event_loop(
             .expect("Failed to lock on server status");
         match event {
             Event::StdinMessage(msg) => {
-                let command_with_args: Vec<&str> = msg.split_whitespace().collect();
-                let command = command_with_args[0].trim();
+                let command_with_args: Vec<&str> = msg.trim().split_whitespace().collect();
+                let command = command_with_args[0];
                 match command {
                     "start" => {
                         if current_server_status == minecraft::MCServerState::Stopped {
