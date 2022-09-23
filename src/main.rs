@@ -48,8 +48,8 @@ async fn main() -> std::io::Result<()> {
     //? separate cancel token
     let stdin_handle = start_stdin_task(event_tx.clone(), proxy_cancel_token.clone());
     run_ssw_event_loop(&mut mc_server, proxy_cancel_token, &mut event_rx).await;
-    stdin_handle.await??;
-    proxy_handle.await??;
+    stdin_handle.await?;
+    proxy_handle.await?;
     Ok(())
 }
 
@@ -143,17 +143,20 @@ fn print_help() {
 /// * `port` - The port to listen on
 ///
 /// returns: `(JoinHandle<io::Result<()>>, CancellationToken)`
-fn start_proxy_task(port: u16) -> (JoinHandle<io::Result<()>>, CancellationToken) {
+fn start_proxy_task(port: u16) -> (JoinHandle<()>, CancellationToken) {
     let token = CancellationToken::new();
     let cloned_token = token.clone();
     let handle = tokio::spawn(async move {
         let inner_clone = cloned_token.clone();
         select! {
             r = run_proxy(port, inner_clone) => {
-                r
+                if let Err(e) = r {
+                    error!("Proxy task failed: {:?}", e);
+                }
             },
             _ = cloned_token.cancelled() => {
-                Ok(())
+                debug!("Proxy task cancelled");
+                return;
             }
         }
     });
@@ -166,17 +169,20 @@ fn start_proxy_task(port: u16) -> (JoinHandle<io::Result<()>>, CancellationToken
 ///
 /// * `tx` - The channel to send the messages through
 /// * `cancel_token` - The cancellation token to use
-fn start_stdin_task(
-    tx: Sender<Event>,
-    cancel_token: CancellationToken,
-) -> JoinHandle<io::Result<()>> {
+fn start_stdin_task(tx: Sender<Event>, cancel_token: CancellationToken) -> JoinHandle<()> {
     let mut stdin_reader = tokio::io::BufReader::new(tokio::io::stdin());
     tokio::spawn(async move {
         loop {
             let mut buf = String::new();
             select! {
                 n = stdin_reader.read_line(&mut buf) => {
-                    let n = n?;
+                    let n = match n {
+                        Ok(n) => n,
+                        Err(e) => {
+                            error!("Failed to read from stdin: {:?}", e);
+                            break;
+                        }
+                    };
                     debug!("Read {} bytes from stdin", n);
                     if n == 0 {
                         warn!("Stdin closed, no more input will be accepted");
@@ -195,7 +201,6 @@ fn start_stdin_task(
                 }
             }
         }
-        Ok::<(), io::Error>(())
     })
 }
 
