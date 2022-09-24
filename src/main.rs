@@ -116,16 +116,28 @@ async fn run_ssw_event_loop(
                     "help" if current_server_status != minecraft::MCServerState::Running => {
                         print_help();
                     }
-                    "ssw-port" => {
-                        if let Some(_arg) = command_with_args.get(1) {
-                            // TODO: check if port is valid and assign it to the servers ssw config
-                        } else {
-                            info!("Current SSW port: {}", mc_server.ssw_config.ssw_port);
-                        }
-                    }
                     "mc-port" => {
-                        if let Some(_arg) = command_with_args.get(1) {
-                            // TODO: check if port is valid and assign it to the server properties file
+                        if let Some(arg) = command_with_args.get(1) {
+                            let _: u16 = match arg.parse() {
+                                Ok(port) => port,
+                                Err(e) => {
+                                    error!("Invalid Minecraft port: {}", e);
+                                    continue;
+                                }
+                            };
+                            mc_server.set_property(
+                                "server-port".to_string(),
+                                serde_json::from_str(arg).unwrap(),
+                            );
+                            if let Err(e) = mc_server.save_properties().await {
+                                warn!("Failed to save properties: {}", e);
+                                if e.kind() == io::ErrorKind::NotFound {
+                                    warn!("server.properties not found, attempting to load it");
+                                    mc_server.load_properties().await;
+                                }
+                            } else {
+                                info!("Minecraft port now set to {}", arg);
+                            }
                         } else {
                             // this just reports the port that the server is using, it doesn't check validity
                             let port = mc_server
@@ -177,7 +189,6 @@ fn print_help() {
         ("help", "prints this help message"),
         ("start", "starts the Minecraft server"),
         (EXIT_COMMAND, "stops the Minecraft server and exits SSW"),
-        ("ssw-port", "show or set the SSW port"),
         ("mc-port", "show or set the Minecraft server port"),
     ];
     // safe to unwrap as this iterator should never be empty
