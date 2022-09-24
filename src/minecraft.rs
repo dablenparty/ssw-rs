@@ -414,7 +414,7 @@ async fn load_properties(path: &Path) -> io::Result<MCServerProperties> {
             let key = split.next()?;
             let value = split
                 .next()
-                .map(|s| s.split("#").next().unwrap_or(""))
+                .map(|s| s.split('#').next().unwrap_or(""))
                 .map_or_else(|| Ok(Value::Null), serde_json::from_str)
                 .unwrap_or(Value::Null);
             Some((key.to_string(), value))
