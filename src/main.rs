@@ -116,38 +116,7 @@ async fn run_ssw_event_loop(
                     "help" if current_server_status != minecraft::MCServerState::Running => {
                         print_help();
                     }
-                    "mc-port" => {
-                        if let Some(arg) = command_with_args.get(1) {
-                            let _: u16 = match arg.parse() {
-                                Ok(port) => port,
-                                Err(e) => {
-                                    error!("Invalid Minecraft port: {}", e);
-                                    continue;
-                                }
-                            };
-                            mc_server.set_property(
-                                "server-port".to_string(),
-                                serde_json::from_str(arg).unwrap(),
-                            );
-                            if let Err(e) = mc_server.save_properties().await {
-                                warn!("Failed to save properties: {}", e);
-                                if e.kind() == io::ErrorKind::NotFound {
-                                    warn!("server.properties not found, attempting to load it");
-                                    mc_server.load_properties().await;
-                                }
-                            } else {
-                                info!("Minecraft port now set to {}", arg);
-                            }
-                        } else {
-                            // this just reports the port that the server is using, it doesn't check validity
-                            let port = mc_server
-                                .get_property("server-port")
-                                .map_or(DEFAULT_MC_PORT.into(), |v| {
-                                    v.as_u64().unwrap_or_else(|| DEFAULT_MC_PORT.into())
-                                });
-                            info!("Current MC port: {}", port);
-                        }
-                    }
+                    "mc-port" => get_or_set_mc_port(&command_with_args, mc_server).await,
                     _ => {
                         if current_server_status == minecraft::MCServerState::Running {
                             // put it all back together and send it to the server
@@ -178,6 +147,47 @@ async fn run_ssw_event_loop(
                 }
             }
         }
+    }
+}
+
+/// Gets or sets the Minecraft server port, depending on the command arguments.
+///
+/// # Arguments
+///
+/// * `command_with_args`: the command and its arguments
+/// * `mc_server`: the Minecraft server instance
+///
+/// returns: `()`
+async fn get_or_set_mc_port(command_with_args: &[&str], mc_server: &mut MinecraftServer) {
+    if let Some(arg) = command_with_args.get(1) {
+        let _: u16 = match arg.parse() {
+            Ok(port) => port,
+            Err(e) => {
+                error!("Invalid Minecraft port: {}", e);
+                return;
+            }
+        };
+        mc_server.set_property(
+            "server-port".to_string(),
+            serde_json::from_str(arg).unwrap(),
+        );
+        if let Err(e) = mc_server.save_properties().await {
+            warn!("Failed to save properties: {}", e);
+            if e.kind() == io::ErrorKind::NotFound {
+                warn!("server.properties not found, attempting to load it");
+                mc_server.load_properties().await;
+            }
+        } else {
+            info!("Minecraft port now set to {}", arg);
+        }
+    } else {
+        // this just reports the port that the server is using, it doesn't check validity
+        let port = mc_server
+            .get_property("server-port")
+            .map_or(DEFAULT_MC_PORT.into(), |v| {
+                v.as_u64().unwrap_or_else(|| DEFAULT_MC_PORT.into())
+            });
+        info!("Current MC port: {}", port);
     }
 }
 
