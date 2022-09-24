@@ -118,7 +118,7 @@ async fn run_ssw_event_loop(
                     }
                     "mc-port" => get_or_set_mc_port(&command_with_args, mc_server).await,
                     _ => {
-                        if current_server_status == minecraft::MCServerState::Running {
+                        if current_server_status != minecraft::MCServerState::Stopped {
                             // put it all back together and send it to the server
                             let command = command_with_args.join(" ");
                             if let Err(e) = mc_server.send_command(command.to_string()).await {
