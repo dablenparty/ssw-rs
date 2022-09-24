@@ -177,9 +177,26 @@ impl MinecraftServer {
             );
         if new_props.is_some() || self.properties.is_none() {
             self.properties = new_props;
+            info!("Loaded server.properties");
         } else {
             warn!("Failed to load server.properties, using existing properties");
         }
+    }
+
+    /// Save the `server.properties` file for this server.
+    ///
+    /// # Errors
+    ///
+    /// An error may occur when writing the properties file.
+    pub async fn save_properties(&self) -> io::Result<()> {
+        let props_path = self.jar_path.with_file_name("server.properties");
+        if self.properties.is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Properties have not been loaded",
+            ));
+        }
+        save_properties(&props_path, self.properties.as_ref().unwrap()).await
     }
 
     /// Get a reference to a property from server.properties
@@ -189,6 +206,23 @@ impl MinecraftServer {
     /// * `key` - The key of the property to get
     pub fn get_property(&self, key: &str) -> Option<&Value> {
         self.properties.as_ref()?.get(key)
+    }
+
+    /// Set a server property if the properties have been loaded
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key of the property to set
+    /// * `value` - The value to set the property to
+    pub fn set_property(&mut self, key: String, value: Value) {
+        if let Some(ref mut props) = self.properties {
+            props.insert(key, value);
+        } else {
+            warn!(
+                "Attempting to set property '{}={}' before server.properties has been loaded",
+                key, value
+            );
+        }
     }
 
     /// Run the Minecraft server process
@@ -380,12 +414,42 @@ async fn load_properties(path: &Path) -> io::Result<MCServerProperties> {
             let key = split.next()?;
             let value = split
                 .next()
+                .map(|s| s.split("#").next().unwrap_or(""))
                 .map_or_else(|| Ok(Value::Null), serde_json::from_str)
                 .unwrap_or(Value::Null);
             Some((key.to_string(), value))
         })
         .collect::<MCServerProperties>();
     Ok(new_props)
+}
+
+/// Save the properties to the given path.
+/// Properties files are expected to be in the format `key=value`.
+/// Any value corresponding to `null` will be saved as an empty string.
+///
+/// # Arguments:
+///
+/// * `path` - The path to the properties file.
+/// * `properties` - The properties to save.
+///
+/// # Errors:
+///
+/// An error is returned if the file could not be written.
+async fn save_properties(path: &Path, properties: &MCServerProperties) -> io::Result<()> {
+    let props_string = properties
+        .iter()
+        .map(|(k, v)| {
+            let vs = if v.is_null() {
+                String::new()
+            } else {
+                v.to_string()
+            };
+            format!("{}={}", k, vs)
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+    tokio::fs::write(path, props_string).await?;
+    Ok(())
 }
 
 /// Waits for the server process to exit, cancels all pipes, and set the server state to `Stopped`.
