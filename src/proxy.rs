@@ -36,12 +36,12 @@ pub async fn run_proxy(
     tx: Sender<Event>,
     mut rx: Receiver<u16>,
 ) -> io::Result<()> {
-    info!("Starting proxy on port {}", ssw_port);
+    debug!("Starting proxy on port {}", ssw_port);
     // TODO: optional command line arg for IP
     let addr = format!("{}:{}", "0.0.0.0", ssw_port);
 
     let listener = TcpListener::bind(&addr).await?;
-    info!("Listening on {}", addr);
+    debug!("Listening on {}", addr);
 
     let (connection_manager_tx, connection_manager_rx) =
         tokio::sync::mpsc::channel::<ConnectionManagerEvent>(100);

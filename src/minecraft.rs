@@ -75,7 +75,7 @@ impl SswConfig {
     ///
     pub async fn new(config_path: &Path) -> serde_json::Result<Self> {
         if config_path.exists() {
-            info!("Loading existing SSW config");
+            debug!("Found existing SSW config");
             let config_string = tokio::fs::read_to_string(config_path)
                 .await
                 .map_err(serde_json::Error::custom)?;
@@ -177,7 +177,7 @@ impl MinecraftServer {
             );
         if new_props.is_some() || self.properties.is_none() {
             self.properties = new_props;
-            info!("Loaded server.properties");
+            debug!("Loaded server.properties");
         } else {
             warn!("Failed to load server.properties, using existing properties");
         }
