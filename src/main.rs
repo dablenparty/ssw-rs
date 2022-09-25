@@ -2,6 +2,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 mod manifest;
+mod mc_version;
 mod minecraft;
 mod proxy;
 mod util;
