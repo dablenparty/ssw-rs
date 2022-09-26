@@ -35,7 +35,23 @@ fn get_manifest_location() -> PathBuf {
         appdata_path
     };
 
-    // TODO: mac and linux
+    #[cfg(target_os = "macos")]
+    let manifest_parent = {
+        let mut home_path = dirs::home_dir().expect("Could not find home directory");
+        home_path.push("Library");
+        home_path.push("Application Support");
+        home_path.push("minecraft");
+        home_path.push("versions");
+        home_path
+    };
+
+    #[cfg(target_os = "linux")]
+    let manifest_parent = {
+        let mut home_path = dirs::home_dir().expect("Could not find home directory");
+        home_path.push(".minecraft");
+        home_path.push("versions");
+        home_path
+    };
 
     manifest_parent.join(MANIFEST_NAME)
 }
