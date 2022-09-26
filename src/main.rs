@@ -20,6 +20,7 @@ use chrono::{DateTime, Local};
 use clap::Parser;
 use flate2::{Compression, GzBuilder};
 use log::{debug, error, info, warn, LevelFilter};
+use manifest::load_versions;
 use simplelog::{
     format_description, ColorChoice, CombinedLogger, TermLogger, TerminalMode, ThreadLogMode,
     WriteLogger,
@@ -220,6 +221,11 @@ async fn run_ssw_event_loop(
                         print_help();
                     }
                     "mc-port" => get_or_set_mc_port(&command_with_args, mc_server).await,
+                    "mc-version" => {
+                        if let Err(e) = get_or_set_mc_version(&command_with_args, mc_server).await {
+                            error!("Failed to get or set Minecraft version: {:?}", e);
+                        }
+                    }
                     _ => {
                         if current_server_status == minecraft::MCServerState::Stopped {
                             error!("Unknown command: {}", command);
@@ -251,6 +257,50 @@ async fn run_ssw_event_loop(
             }
         }
     }
+}
+
+/// Gets or sets the Minecraft server version based on the command line arguments.
+///
+/// # Arguments
+///
+/// * `command_with_args`: the command line arguments
+/// * `mc_server`: a reference to the Minecraft server instance
+///
+/// # Errors
+///
+/// An error will be returned if the given version is invalid or an IO error occurs.
+async fn get_or_set_mc_version(
+    command_with_args: &[&str],
+    mc_server: &mut MinecraftServer,
+) -> io::Result<()> {
+    if command_with_args.len() == 1 {
+        println!(
+            "Minecraft version: {}",
+            mc_server
+                .ssw_config
+                .mc_version
+                .as_ref()
+                .unwrap_or(&"Unknown".to_string())
+        );
+    } else {
+        let version = command_with_args[1];
+        let all_versions = load_versions().await?;
+        let _ = all_versions
+            .iter()
+            .find(|v| v.id == version)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("Invalid Minecraft version: {}", version),
+                )
+            })?;
+        mc_server.ssw_config.mc_version = Some(version.to_string());
+        mc_server
+            .ssw_config
+            .save(&mc_server.get_config_path())
+            .await?;
+    }
+    Ok(())
 }
 
 /// Gets or sets the Minecraft server port, depending on the command arguments.
@@ -298,11 +348,16 @@ async fn get_or_set_mc_port(command_with_args: &[&str], mc_server: &mut Minecraf
 fn print_help() {
     // padding before the command name
     const COMMAND_PADDING: usize = 2;
+    // TODO: extract commands to command map
     let commands = vec![
         ("help", "prints this help message"),
         ("start", "starts the Minecraft server"),
         (EXIT_COMMAND, "stops the Minecraft server and exits SSW"),
-        ("mc-port", "show or set the Minecraft server port"),
+        ("mc-port [port]", "show or set the Minecraft server port"),
+        (
+            "mc-version",
+            "manually show or set the Minecraft server version",
+        ),
     ];
     // safe to unwrap as this iterator should never be empty
     let max_command_len = commands
