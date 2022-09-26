@@ -3,6 +3,7 @@ use serde::Deserialize;
 
 #[repr(u8)]
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MCVersionType {
     Release = 0,
     Snapshot = 1,
@@ -11,6 +12,7 @@ pub enum MCVersionType {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MinecraftVersion {
     pub id: String,
     pub r#type: MCVersionType,
