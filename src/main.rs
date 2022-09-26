@@ -14,6 +14,7 @@ use std::{
 
 use crate::minecraft::{MinecraftServer, DEFAULT_MC_PORT};
 use chrono::{DateTime, Local};
+use clap::Parser;
 use flate2::{Compression, GzBuilder};
 use log::{debug, error, info, warn, LevelFilter};
 use simplelog::{
@@ -33,19 +34,35 @@ pub enum Event {
     McPortRequest,
 }
 
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct CommandLineArgs {
+    #[clap(forbid_empty_values = true)]
+    /// The path to the Minecraft server jar file.
+    server_jar: PathBuf,
+
+    #[clap(short, long, value_parser, default_value_t = LevelFilter::Info)]
+    /// The log level to use.
+    log_level: LevelFilter,
+
+    #[clap(short, long, takes_value = false)]
+    /// Whether to refresh the Minecraft server manifest.
+    refresh_manifest: bool,
+}
+
 const EXIT_COMMAND: &str = "exit";
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    if let Err(e) = init_logger() {
+    let args = CommandLineArgs::parse();
+    if let Err(e) = init_logger(args.log_level) {
         error!("failed to initialize logger: {:?}", e);
         std::process::exit(1);
     }
-    // TODO: command line arg parser
-    let path = std::env::args().nth(1).expect("Missing path to server jar");
+    debug!("Parsed command line arguments: {:?}", args);
     let cargo_version = env!("CARGO_PKG_VERSION");
     println!("SSW Console v{}", cargo_version);
-    let mut mc_server = MinecraftServer::new(dunce::canonicalize(PathBuf::from(path))?).await;
+    let mut mc_server = MinecraftServer::new(dunce::canonicalize(args.server_jar)?).await;
     let port = mc_server.ssw_config.ssw_port;
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<Event>(100);
     let (proxy_handle, proxy_cancel_token, proxy_tx) = start_proxy_task(port, event_tx.clone());
@@ -337,11 +354,12 @@ fn zip_logs() -> io::Result<PathBuf> {
 
 /// Initializes the logger
 ///
-/// In debug mode, the logger will log DEBUG and above. In release, it will log INFO and above.
-/// Both modes will log to the console and to a file.
+/// # Arguments
+///
+/// * `level_filter` - The log level filter to use
 ///
 /// returns: `Result<(), Box<dyn std::error::Error>>`
-fn init_logger() -> Result<(), Box<dyn std::error::Error>> {
+fn init_logger(level_filter: LevelFilter) -> Result<(), Box<dyn std::error::Error>> {
     let config = simplelog::ConfigBuilder::new()
         .set_time_format_custom(format_description!("[[[hour]:[minute]:[second]]"))
         .set_thread_mode(ThreadLogMode::Both)
@@ -351,12 +369,6 @@ fn init_logger() -> Result<(), Box<dyn std::error::Error>> {
 
     let log_path = zip_logs()?;
     let log_file = std::fs::File::create(log_path)?;
-    // TODO: command line arg to set log level
-    let level_filter = if cfg!(debug_assertions) {
-        LevelFilter::Debug
-    } else {
-        LevelFilter::Info
-    };
     CombinedLogger::init(vec![
         TermLogger::new(
             level_filter,
