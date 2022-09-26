@@ -22,7 +22,7 @@ struct VersionManifestV2 {
 /// Gets the location to the launcher manifest.
 ///
 /// - Windows: `%APPDATA%/.minecraft/versions/version_manifest_v2.json`
-/// - macOSX:  `~/Library/Application Support/minecraft/versions/version_manifest_v2.json`
+/// - Mac:  `~/Library/Application Support/minecraft/versions/version_manifest_v2.json`
 /// - Linux:   `~/.minecraft/versions/version_manifest_v2.json`
 fn get_manifest_location() -> PathBuf {
     const MANIFEST_NAME: &str = "version_manifest_v2.json";
