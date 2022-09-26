@@ -9,10 +9,13 @@ mod util;
 
 use std::{
     io::{self, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
-use crate::minecraft::{MinecraftServer, DEFAULT_MC_PORT};
+use crate::{
+    manifest::refresh_manifest,
+    minecraft::{MinecraftServer, DEFAULT_MC_PORT},
+};
 use chrono::{DateTime, Local};
 use clap::Parser;
 use flate2::{Compression, GzBuilder};
@@ -64,13 +67,39 @@ async fn main() -> io::Result<()> {
     println!("SSW Console v{}", cargo_version);
     if args.refresh_manifest {
         info!("Refreshing Minecraft server manifest...");
-        if let Err(e) = manifest::refresh_manifest().await {
+        if let Err(e) = refresh_manifest().await {
             error!("failed to refresh manifest: {:?}", e);
         } else {
             info!("Successfully refreshed Minecraft server manifest.");
         }
     }
     let mut mc_server = MinecraftServer::new(dunce::canonicalize(args.server_jar)?).await;
+    if mc_server.ssw_config.mc_version.is_none() || args.refresh_manifest {
+        let mc_version_string = try_read_version_from_jar(
+            mc_server
+                .jar_path()
+                .parent()
+                .expect("server jar is somehow the root directory"),
+        )
+        .unwrap_or_else(|e| {
+            warn!("error occurred trying to read version from jar: {}", e);
+            None
+        });
+        if let Some(mc_version_string) = mc_version_string {
+            info!("Found Minecraft version in jar: {}", mc_version_string);
+            mc_server.ssw_config.mc_version = Some(mc_version_string);
+        } else {
+            // TODO: prompt user for version (or add a command to do so, telling user to use it)
+            warn!("Could not find Minecraft version in jar.");
+        }
+        if let Err(e) = mc_server
+            .ssw_config
+            .save(&mc_server.get_config_path())
+            .await
+        {
+            error!("failed to save SSW config: {:?}", e);
+        }
+    }
     let port = mc_server.ssw_config.ssw_port;
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<Event>(100);
     let (proxy_handle, proxy_cancel_token, proxy_tx) = start_proxy_task(port, event_tx.clone());
@@ -80,6 +109,53 @@ async fn main() -> io::Result<()> {
     stdin_handle.await?;
     proxy_handle.await?;
     Ok(())
+}
+
+/// Tries to read the Minecraft version from every jar file found in a given directory.
+///
+/// Newer versions of Minecraft store the version in a `version.json` file packaged in with the server jar.
+/// This function tries to read the version from that file.
+///
+/// The version ID string (e.g., `1.19`) will be returned if it is found, or `None` if it is not.
+///
+/// # Arguments
+///
+/// * `server_folder` - The directory containing the server jar.
+///
+/// # Errors
+///
+/// An error will be returned if the directory or a jar file cannot be read.
+fn try_read_version_from_jar(server_folder: &Path) -> io::Result<Option<String>> {
+    // get all jar files, ignoring errors (e.g., if a file is not a jar)
+    let jar_files = server_folder
+        .read_dir()?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            if entry.path().extension()?.to_str()? == "jar" {
+                Some(entry.path())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    for jar in jar_files {
+        let jar_handle = std::fs::File::open(&jar)?;
+        let mut jar_reader = zip::ZipArchive::new(jar_handle)?;
+        match jar_reader.by_name("version.json") {
+            Ok(version_json) => {
+                let parsed: serde_json::Value = serde_json::from_reader(version_json)?;
+                return Ok(parsed["id"].as_str().map(String::from));
+            }
+            Err(e) => {
+                warn!(
+                    "failed to read version.json from jar file {:?}: {:?}",
+                    jar, e
+                );
+                continue;
+            }
+        };
+    }
+    Ok(None)
 }
 
 /// Runs the main event loop for SSW. This loop handles all events that are sent to the event channel.
