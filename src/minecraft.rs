@@ -102,6 +102,16 @@ impl SswConfig {
             Ok(config)
         }
     }
+
+    /// Save the config to the given path
+    ///
+    /// # Arguments
+    ///
+    /// * `config_path` - The path to the config file. If it does not exist, it will be created with default values.
+    pub async fn save(&self, config_path: &Path) -> io::Result<()> {
+        let config_string = serde_json::to_string_pretty(&self)?;
+        tokio::fs::write(config_path, config_string).await
+    }
 }
 
 pub const DEFAULT_MC_PORT: u16 = 25565;
@@ -225,6 +235,10 @@ impl MinecraftServer {
         }
     }
 
+    pub fn get_config_path(&self) -> PathBuf {
+        self.jar_path.with_file_name(".ssw").join("ssw.json")
+    }
+
     /// Run the Minecraft server process
     ///
     /// # Errors
@@ -234,7 +248,7 @@ impl MinecraftServer {
         // TODO: check java version
         info!("Checking Java version...");
         info!("Loading SSW config...");
-        let config_path = self.jar_path.with_file_name(".ssw").join("ssw.json");
+        let config_path = self.get_config_path();
         self.ssw_config = SswConfig::new(&config_path).await.unwrap_or_else(|e| {
             error!("Failed to load SSW config: {}", e);
             error!("Using default SSW config");
@@ -352,6 +366,10 @@ impl MinecraftServer {
     /// Gets a clone of the `Arc<Mutex<MCServerState>>` for the server's state.
     pub fn status(&self) -> Arc<Mutex<MCServerState>> {
         self.state.clone()
+    }
+
+    pub fn jar_path(&self) -> &Path {
+        self.jar_path.as_path()
     }
 }
 
