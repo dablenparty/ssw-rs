@@ -62,6 +62,14 @@ async fn main() -> io::Result<()> {
     debug!("Parsed command line arguments: {:?}", args);
     let cargo_version = env!("CARGO_PKG_VERSION");
     println!("SSW Console v{}", cargo_version);
+    if args.refresh_manifest {
+        info!("Refreshing Minecraft server manifest...");
+        if let Err(e) = manifest::refresh_manifest().await {
+            error!("failed to refresh manifest: {:?}", e);
+        } else {
+            info!("Successfully refreshed Minecraft server manifest.");
+        }
+    }
     let mut mc_server = MinecraftServer::new(dunce::canonicalize(args.server_jar)?).await;
     let port = mc_server.ssw_config.ssw_port;
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<Event>(100);
