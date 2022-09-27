@@ -18,7 +18,10 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::util::async_create_dir_if_not_exists;
+use crate::{
+    manifest::load_versions, mc_version::get_required_java_version, try_read_version_from_jar,
+    util::async_create_dir_if_not_exists,
+};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -235,6 +238,44 @@ impl MinecraftServer {
         }
     }
 
+    /// Loads the version of the Minecraft server and its required Java version.
+    pub async fn load_version(&mut self) -> io::Result<()> {
+        let mc_version_string = try_read_version_from_jar(
+            self.jar_path()
+                .parent()
+                .expect("server jar is somehow the root directory"),
+        )
+        .unwrap_or_else(|e| {
+            warn!("error occurred trying to read version from jar: {}", e);
+            None
+        });
+        if let Some(mc_version_string) = mc_version_string {
+            info!("Found Minecraft version in jar: {}", mc_version_string);
+            let versions = load_versions().await?;
+            let mc_version = versions.iter().find(|v| v.id == mc_version_string).unwrap();
+            let required_java_version =
+                get_required_java_version(mc_version)
+                    .await
+                    .unwrap_or_else(|e| {
+                        warn!("error occurred requesting the required Java version: {}", e);
+                        "17.0".to_string()
+                    });
+            info!("Found required Java version: {}", required_java_version);
+            self.ssw_config.mc_version = Some(mc_version_string);
+            self.ssw_config.required_java_version = required_java_version;
+            if let Err(e) = self.ssw_config.save(&self.get_config_path()).await {
+                error!("failed to save SSW config: {:?}", e);
+            }
+        } else {
+            warn!("Could not find Minecraft version in jar.");
+            warn!("Please use the mc-version command to set the Minecraft version.");
+        }
+        Ok(())
+    }
+
+    /// Gets the server's default config path
+    ///
+    /// This will resolve to `{server_jar_path}/.ssw/ssw.json`
     pub fn get_config_path(&self) -> PathBuf {
         self.jar_path.with_file_name(".ssw").join("ssw.json")
     }
