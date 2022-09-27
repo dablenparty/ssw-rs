@@ -1,4 +1,7 @@
+use std::{io, path::Path};
+
 use chrono::{DateTime, Utc};
+use log::warn;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -41,4 +44,51 @@ pub async fn get_required_java_version(mc_version: &MinecraftVersion) -> reqwest
     } else {
         Ok(format!("{}.0", major_version))
     }
+}
+
+/// Tries to read the Minecraft version from every jar file found in a given directory.
+///
+/// Newer versions of Minecraft store the version in a `version.json` file packaged in with the server jar.
+/// This function tries to read the version from that file.
+///
+/// The version ID string (e.g., `1.19`) will be returned if it is found, or `None` if it is not.
+///
+/// # Arguments
+///
+/// * `server_folder` - The directory containing the server jar.
+///
+/// # Errors
+///
+/// An error will be returned if the directory or a jar file cannot be read.
+pub fn try_read_version_from_jar(server_folder: &Path) -> io::Result<Option<String>> {
+    // get all jar files, ignoring errors (e.g., if a file is not a jar)
+    let jar_files = server_folder
+        .read_dir()?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            if entry.path().extension()?.to_str()? == "jar" {
+                Some(entry.path())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    for jar in jar_files {
+        let jar_handle = std::fs::File::open(&jar)?;
+        let mut jar_reader = zip::ZipArchive::new(jar_handle)?;
+        match jar_reader.by_name("version.json") {
+            Ok(version_json) => {
+                let parsed: serde_json::Value = serde_json::from_reader(version_json)?;
+                return Ok(parsed["id"].as_str().map(String::from));
+            }
+            Err(e) => {
+                warn!(
+                    "failed to read version.json from jar file {:?}: {:?}",
+                    jar, e
+                );
+                continue;
+            }
+        };
+    }
+    Ok(None)
 }

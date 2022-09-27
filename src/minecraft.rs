@@ -19,7 +19,8 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    manifest::load_versions, mc_version::get_required_java_version, try_read_version_from_jar,
+    manifest::load_versions,
+    mc_version::{get_required_java_version, try_read_version_from_jar},
     util::async_create_dir_if_not_exists,
 };
 
