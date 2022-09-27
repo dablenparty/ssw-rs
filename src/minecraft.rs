@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use lazy_static::lazy_static;
 use log::{debug, error, info, warn};
 use regex::Regex;
 use serde::{de::Error, Deserialize, Serialize};
@@ -626,8 +627,12 @@ async fn pipe_and_monitor_stdout(
     cancellation_token: CancellationToken,
     server_state: Arc<Mutex<MCServerState>>,
 ) -> io::Result<()> {
-    let ready_line_regex = Regex::new(r#"^(\[.+]:?)+ Done (\(\d+\.\d+s\))?!"#).unwrap();
-    let stopping_server_line_regex = Regex::new(r#"^(\[.+]:?)+ Stopping the server"#).unwrap();
+    lazy_static! {
+        static ref READY_REGEX: Regex =
+            Regex::new(r#"^(\[.+]:?)+ Done (\(\d+\.\d+s\))?!"#).unwrap();
+        static ref STOPPING_REGEX: Regex =
+            Regex::new(r#"^(\[.+]:?)+ Stopping the server"#).unwrap();
+    }
     // doing this manually is slower than using tokio::io::copy, but it allows us to monitor the
     // output and update the server state
     let buf = &mut String::new();
@@ -644,12 +649,12 @@ async fn pipe_and_monitor_stdout(
                 match *current_state_lock {
                     MCServerState::Stopped => error!("Reading IO after server stopped"),
                     MCServerState::Starting => {
-                        if ready_line_regex.is_match(buf) {
+                        if READY_REGEX.is_match(buf) {
                             *current_state_lock = MCServerState::Running;
                         }
                     },
                     MCServerState::Running => {
-                        if stopping_server_line_regex.is_match(buf) {
+                        if STOPPING_REGEX.is_match(buf) {
                             *current_state_lock = MCServerState::Stopping;
                         }
                     },
