@@ -4,7 +4,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use lazy_static::lazy_static;
 use log::debug;
+use regex::bytes::Regex;
 
 /// Gets the path to the directory containing the executable, resolving symlinks if necessary.
 ///
@@ -103,4 +105,42 @@ pub async fn async_create_dir_if_not_exists(dir_path: &Path) -> io::Result<()> {
     } else {
         Ok(())
     }
+}
+
+/// Runs the given Java executable with the `-version` flag and parses the output to get the version
+/// number.
+///
+/// # Arguments
+///
+/// * `java_executable`: the path to the Java executable
+///
+/// # Errors
+///
+/// If the Java executable fails to run, the output cannot be parsed, or the version string is not found
+/// in the output, an error is returned.
+pub async fn get_java_version(java_executable: &Path) -> io::Result<String> {
+    lazy_static! {
+        static ref JAVA_VERSION_REGEX: Regex =
+            Regex::new(r#"^(\w+) version "(?P<version>\d+\.\d+\.\d+)(_\d+)?""#).unwrap();
+    }
+    let output = tokio::process::Command::new(java_executable)
+        .arg("-version")
+        .output()
+        .await?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let version = match JAVA_VERSION_REGEX.captures(stderr.as_bytes()) {
+        Some(captures) => String::from_utf8_lossy(
+            captures
+                .name("version")
+                .map_or("17.0".as_bytes(), |v| v.as_bytes()),
+        ),
+
+        None => {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("failed to get java version from {}", stderr),
+            ))
+        }
+    };
+    Ok(version.to_string())
 }
