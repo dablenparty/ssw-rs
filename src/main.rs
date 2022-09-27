@@ -21,6 +21,7 @@ use clap::Parser;
 use flate2::{Compression, GzBuilder};
 use log::{debug, error, info, warn, LevelFilter};
 use manifest::load_versions;
+use mc_version::get_required_java_version;
 use simplelog::{
     format_description, ColorChoice, CombinedLogger, TermLogger, TerminalMode, ThreadLogMode,
     WriteLogger,
@@ -76,7 +77,9 @@ async fn main() -> io::Result<()> {
     }
     let mut mc_server = MinecraftServer::new(dunce::canonicalize(args.server_jar)?).await;
     if mc_server.ssw_config.mc_version.is_none() || args.refresh_manifest {
-        load_version(&mut mc_server).await;
+        if let Err(e) = load_version(&mut mc_server).await {
+            error!("failed to load version: {}", e);
+        }
     }
     let port = mc_server.ssw_config.ssw_port;
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<Event>(100);
@@ -94,7 +97,7 @@ async fn main() -> io::Result<()> {
 /// # Arguments
 ///
 /// * `mc_server` - The Minecraft server to load the version for.
-async fn load_version(mc_server: &mut MinecraftServer) {
+async fn load_version(mc_server: &mut MinecraftServer) -> io::Result<()> {
     let mc_version_string = try_read_version_from_jar(
         mc_server
             .jar_path()
@@ -107,7 +110,18 @@ async fn load_version(mc_server: &mut MinecraftServer) {
     });
     if let Some(mc_version_string) = mc_version_string {
         info!("Found Minecraft version in jar: {}", mc_version_string);
+        let versions = load_versions().await?;
+        let mc_version = versions.iter().find(|v| v.id == mc_version_string).unwrap();
+        let required_java_version =
+            get_required_java_version(mc_version)
+                .await
+                .unwrap_or_else(|e| {
+                    warn!("error occurred requesting the required Java version: {}", e);
+                    "17.0".to_string()
+                });
+        info!("Found required Java version: {}", required_java_version);
         mc_server.ssw_config.mc_version = Some(mc_version_string);
+        mc_server.ssw_config.required_java_version = required_java_version;
         if let Err(e) = mc_server
             .ssw_config
             .save(&mc_server.get_config_path())
@@ -119,6 +133,7 @@ async fn load_version(mc_server: &mut MinecraftServer) {
         warn!("Could not find Minecraft version in jar.");
         warn!("Please use the mc-version command to set the Minecraft version.");
     }
+    Ok(())
 }
 
 /// Tries to read the Minecraft version from every jar file found in a given directory.
