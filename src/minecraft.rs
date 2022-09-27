@@ -265,6 +265,12 @@ impl MinecraftServer {
             }
         }
         // TODO: patch Log4j
+        let _mc_version = self.ssw_config.mc_version.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Minecraft version is not specified",
+            )
+        })?;
         let memory_in_mb = self.ssw_config.memory_in_gb * 1024.0;
         // truncation is intentional
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
