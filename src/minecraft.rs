@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     io::{self, Write},
     path::{Path, PathBuf},
+    process,
     sync::{Arc, Mutex},
 };
 
@@ -292,8 +293,7 @@ impl MinecraftServer {
         info!("Loading SSW config...");
         let config_path = self.get_config_path();
         self.ssw_config = SswConfig::new(&config_path).await.unwrap_or_else(|e| {
-            error!("Failed to load SSW config: {}", e);
-            error!("Using default SSW config");
+            error!("Failed to load SSW config, using default: {}", e);
             SswConfig::default()
         });
         info!("SSW config loaded: {:?}", self.ssw_config);
@@ -314,7 +314,6 @@ impl MinecraftServer {
             )
         })?;
         let memory_in_mb = self.ssw_config.memory_in_gb * 1024.0;
-        // truncation is intentional
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let memory_arg = format!("-Xmx{}M", memory_in_mb.abs() as u32);
         let proc_args = vec![
@@ -333,15 +332,16 @@ impl MinecraftServer {
         {
             *self.state.lock().unwrap() = MCServerState::Starting;
         }
+        // use the jar path parent. otherwise, use the current directory. otherwise again, use "."
         let mut child = tokio::process::Command::new(proc_args[0])
             .current_dir(self.jar_path.parent().map_or_else(
                 || std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
                 Path::to_path_buf,
             ))
             .args(&proc_args[1..])
-            .stderr(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stdin(std::process::Stdio::piped())
+            .stderr(process::Stdio::piped())
+            .stdout(process::Stdio::piped())
+            .stdin(process::Stdio::piped())
             .spawn()?;
         // pipe stdout and stderr to stdout
         let stdout = child.stdout.take().unwrap();
@@ -379,10 +379,10 @@ impl MinecraftServer {
         let proc_stdin = child.stdin.take().unwrap();
         let stdin_token = CancellationToken::new();
         let cloned_token = stdin_token.clone();
-        let (tx, rx) = tokio::sync::mpsc::channel::<String>(3);
-        self.server_stdin_sender = Some(tx);
+        let (stdin_tx, stdin_rx) = tokio::sync::mpsc::channel::<String>(3);
+        self.server_stdin_sender = Some(stdin_tx);
         let stdin_handle = tokio::spawn(async move {
-            if let Err(err) = pipe_stdin(proc_stdin, rx, cloned_token).await {
+            if let Err(err) = pipe_stdin(proc_stdin, stdin_rx, cloned_token).await {
                 error!("Error reading from stdin: {}", err);
             }
         });
@@ -439,19 +439,19 @@ impl MinecraftServer {
             if ver == req {
                 // skip to more specific version
                 continue;
-            } else if ver > req {
+            }
+            if ver > req {
                 // version is good
                 break;
-            } else {
-                // version is too low
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!(
-                        "Java version {} is less than the required version {}",
-                        java_version, self.ssw_config.required_java_version
-                    ),
-                ));
             }
+            // version is too low
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "Java version {} is less than the required version {}",
+                    java_version, self.ssw_config.required_java_version
+                ),
+            ));
         }
         Ok(())
     }
