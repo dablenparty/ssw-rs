@@ -144,3 +144,21 @@ pub async fn get_java_version(java_executable: &Path) -> io::Result<String> {
     };
     Ok(version.to_string())
 }
+
+/// Converts a `Path` to a `&str` if it is valid UTF-8, otherwise returns an error.
+///
+/// # Arguments
+///
+/// * `path`: the path to convert
+///
+/// # Errors
+///
+/// If the path is not valid UTF-8, an error is returned.
+pub fn path_to_str(path: &Path) -> io::Result<&str> {
+    path.to_str().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("path '{}' is not valid UTF-8", path.display()),
+        )
+    })
+}
