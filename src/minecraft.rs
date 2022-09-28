@@ -23,7 +23,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     manifest::load_versions,
     mc_version::{get_required_java_version, try_read_version_from_jar},
-    util::{async_create_dir_if_not_exists, get_java_version},
+    util::{async_create_dir_if_not_exists, get_java_version, path_to_str},
 };
 
 #[repr(u8)]
@@ -289,7 +289,8 @@ impl MinecraftServer {
     ///
     /// An error can occur when loading the config or when spawning the child process.
     pub async fn run(&mut self) -> io::Result<()> {
-        self.check_java_version().await?;
+        let java_executable = self.get_java_executable().await?;
+        self.check_java_version(&java_executable).await?;
         info!("Loading SSW config...");
         let config_path = self.get_config_path();
         self.ssw_config = SswConfig::new(&config_path).await.unwrap_or_else(|e| {
@@ -317,16 +318,11 @@ impl MinecraftServer {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let memory_arg = format!("-Xmx{}M", memory_in_mb.abs() as u32);
         let proc_args = vec![
-            "java",
+            path_to_str(&java_executable)?,
             "-Xms512M",
             memory_arg.as_str(),
             "-jar",
-            self.jar_path.to_str().ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Invalid unicode found in JAR path",
-                )
-            })?,
+            path_to_str(&self.jar_path)?,
             "nogui",
         ];
         {
@@ -399,35 +395,15 @@ impl MinecraftServer {
 
     /// Checks that this servers configured Java version is valid
     ///
+    /// # Arguments
+    ///
+    /// * `java_location` - The location of the Java executable
+    ///
     /// # Errors
     ///
     /// An error can occur when loading the version from config or spawning the child process.
-    async fn check_java_version(&mut self) -> io::Result<()> {
+    async fn check_java_version(&mut self, java_location: &Path) -> io::Result<()> {
         info!("Checking Java version...");
-        let java_exec_store = self.get_config_path().with_file_name("java_executable");
-        let java_location = if java_exec_store.exists() {
-            // the java executable is stored in the config directory
-            tokio::fs::read_to_string(java_exec_store)
-                .await
-                .map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("Failed to read java executable path: {}", e),
-                    )
-                })
-                .map(PathBuf::from)?
-        } else {
-            // try to find java in PATH
-            let java_location = which::which("java").map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("Failed to find java executable in PATH: {}", e),
-                )
-            })?;
-            // store the java executable path in the config directory for later use
-            tokio::fs::write(java_exec_store, java_location.to_string_lossy().as_bytes()).await?;
-            java_location
-        };
         let java_version = get_java_version(&java_location).await?;
         info!("Found Java version: {}", java_version);
         // compare version number in the order of major, minor, patch
@@ -454,6 +430,41 @@ impl MinecraftServer {
             ));
         }
         Ok(())
+    }
+
+    /// Loads the Java executable path from the config. If the config is not set, it will try to
+    /// find the Java executable in the PATH environment variable and then store it in the config
+    /// for future use.
+    ///
+    /// # Errors
+    ///
+    /// An error can occur when loading the path from config or checking `PATH`.
+    async fn get_java_executable(&mut self) -> io::Result<PathBuf> {
+        let java_exec_store = self.get_config_path().with_file_name("java_executable");
+        let java_location = if java_exec_store.exists() {
+            // the java executable is stored in the config directory
+            tokio::fs::read_to_string(java_exec_store)
+                .await
+                .map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed to read java executable path: {}", e),
+                    )
+                })
+                .map(PathBuf::from)?
+        } else {
+            // try to find java in PATH
+            let java_location = which::which("java").map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("Failed to find java executable in PATH: {}", e),
+                )
+            })?;
+            // store the java executable path in the config directory for later use
+            tokio::fs::write(java_exec_store, java_location.to_string_lossy().as_bytes()).await?;
+            java_location
+        };
+        Ok(java_location)
     }
 
     /// Waits for the server to exit.
