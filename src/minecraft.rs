@@ -404,7 +404,7 @@ impl MinecraftServer {
     /// An error can occur when loading the version from config or spawning the child process.
     async fn check_java_version(&mut self, java_location: &Path) -> io::Result<()> {
         info!("Checking Java version...");
-        let java_version = get_java_version(&java_location).await?;
+        let java_version = get_java_version(java_location).await?;
         info!("Found Java version: {}", java_version);
         // compare version number in the order of major, minor, patch
         for (ver, req) in java_version
