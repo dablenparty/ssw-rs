@@ -7,15 +7,11 @@ use crate::mc_version::MinecraftVersion;
 
 const MANIFEST_V2_LINK: &str = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
 
-#[derive(Debug, Deserialize)]
-struct Latest {
-    release: String,
-    snapshot: String,
-}
-
+/// The manifest of all Minecraft versions.
+///
+/// This struct is not a complete representation of the manifest, but only the parts that are needed.
 #[derive(Deserialize)]
 struct VersionManifestV2 {
-    latest: Latest,
     versions: Vec<MinecraftVersion>,
 }
 
