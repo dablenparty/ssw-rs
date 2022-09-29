@@ -7,6 +7,10 @@ pub enum SswError {
     IoError(io::Error),
     ReqwestError(reqwest::Error),
     LoggingError(log::SetLoggerError),
+    /// Raised when the second argument, the actual version string, is lower than the first argument,
+    /// the minimum required version string.
+    BadJavaVersion(String, String),
+    MissingMinecraftVersion,
 }
 
 pub type Result<T> = std::result::Result<T, SswError>;
@@ -17,6 +21,12 @@ impl fmt::Display for SswError {
             SswError::IoError(e) => write!(f, "IO error: {}", e),
             SswError::ReqwestError(e) => write!(f, "Reqwest error: {}", e),
             SswError::LoggingError(e) => write!(f, "Logging error: {}", e),
+            SswError::BadJavaVersion(required, actual) => write!(
+                f,
+                "Java version '{}' is less than the required '{}'",
+                actual, required
+            ),
+            SswError::MissingMinecraftVersion => write!(f, "Minecraft version not specified"),
         }
     }
 }

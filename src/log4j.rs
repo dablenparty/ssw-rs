@@ -1,9 +1,10 @@
-use std::io;
-
 use log::{debug, info};
 
 use crate::{
-    manifest::load_versions, mc_version::MinecraftVersion, minecraft::MinecraftServer, ssw_error,
+    manifest::load_versions,
+    mc_version::MinecraftVersion,
+    minecraft::MinecraftServer,
+    ssw_error::{self, SswError},
 };
 
 /// Helper function to get a Minecraft version from a version string.
@@ -35,12 +36,11 @@ fn get_version_by_id<'a>(versions: &'a [MinecraftVersion], id: &str) -> &'a Mine
 /// - The server config fails to save
 pub async fn patch_log4j(mc_server: &mut MinecraftServer) -> ssw_error::Result<()> {
     let versions = load_versions().await?;
-    let server_version_id = mc_server.ssw_config.mc_version.as_ref().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Minecraft version not specified in server config",
-        )
-    })?;
+    let server_version_id = mc_server
+        .ssw_config
+        .mc_version
+        .as_ref()
+        .ok_or(SswError::MissingMinecraftVersion)?;
     // unwrap is safe because the version id is validated when it is assigned
     let server_version = versions
         .iter()

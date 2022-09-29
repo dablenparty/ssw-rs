@@ -24,7 +24,7 @@ use crate::{
     log4j::patch_log4j,
     manifest::load_versions,
     mc_version::{get_required_java_version, try_read_version_from_jar},
-    ssw_error,
+    ssw_error::{self, SswError},
     util::{async_create_dir_if_not_exists, get_java_version, path_to_str},
 };
 
@@ -405,7 +405,7 @@ impl MinecraftServer {
     /// # Errors
     ///
     /// An error can occur when loading the version from config or spawning the child process.
-    async fn check_java_version(&mut self, java_location: &Path) -> io::Result<()> {
+    async fn check_java_version(&mut self, java_location: &Path) -> ssw_error::Result<()> {
         info!("Checking Java version...");
         let java_version = get_java_version(java_location).await?;
         info!("Found Java version: {}", java_version);
@@ -424,12 +424,9 @@ impl MinecraftServer {
                 break;
             }
             // version is too low
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!(
-                    "Java version {} is less than the required version {}",
-                    java_version, self.ssw_config.required_java_version
-                ),
+            return Err(SswError::BadJavaVersion(
+                self.ssw_config.required_java_version.clone(),
+                java_version,
             ));
         }
         Ok(())
@@ -448,12 +445,6 @@ impl MinecraftServer {
             // the java executable is stored in the config directory
             tokio::fs::read_to_string(java_exec_store)
                 .await
-                .map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("Failed to read java executable path: {}", e),
-                    )
-                })
                 .map(PathBuf::from)?
         } else {
             // try to find java in PATH
