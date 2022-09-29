@@ -17,6 +17,7 @@ use std::{
 use crate::{
     manifest::refresh_manifest,
     minecraft::{MinecraftServer, DEFAULT_MC_PORT},
+    ssw_error::SswError,
 };
 use chrono::{DateTime, Local};
 use clap::Parser;
@@ -131,6 +132,9 @@ async fn run_ssw_event_loop(
                         if current_server_status == minecraft::MCServerState::Stopped {
                             if let Err(e) = mc_server.run().await {
                                 error!("Failed to start server: {:?}", e);
+                                if let SswError::MissingMinecraftVersion = e {
+                                    error!("Use the 'mc-version' command to set the Minecraft version of the server.");
+                                }
                             }
                         } else {
                             warn!("Server is already running");
@@ -157,7 +161,9 @@ async fn run_ssw_event_loop(
                     "mc-port" => get_or_set_mc_port(&command_with_args, mc_server).await,
                     "mc-version" => {
                         if let Err(e) = get_or_set_mc_version(&command_with_args, mc_server).await {
-                            error!("Failed to get or set Minecraft version: {:?}", e);
+                            error!("Failed to get or set Minecraft version: {}", e);
+                        } else {
+                            info!("Successfully set Minecraft version.");
                         }
                     }
                     _ => {

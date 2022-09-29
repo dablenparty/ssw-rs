@@ -331,6 +331,7 @@ impl MinecraftServer {
         {
             *self.state.lock().unwrap() = MCServerState::Starting;
         }
+        info!("Starting Minecraft server...");
         // use the jar path parent. otherwise, use the current directory. otherwise again, use "."
         let mut child = tokio::process::Command::new(proc_args[0])
             .current_dir(self.jar_path.parent().map_or_else(
