@@ -329,6 +329,7 @@ impl MinecraftServer {
         ];
         debug!("Running Minecraft server with args: {:?}", proc_args);
         {
+            debug!("Setting server state to Starting");
             *self.state.lock().unwrap() = MCServerState::Starting;
         }
         info!("Starting Minecraft server...");
@@ -620,6 +621,7 @@ async fn exit_handler(
             error!("Error waiting for pipe: {}", err);
         }
     }
+    debug!("Setting server state to Stopped");
     *status_clone.lock().unwrap() = MCServerState::Stopped;
 }
 
@@ -665,11 +667,13 @@ async fn pipe_and_monitor_stdout(
                     MCServerState::Stopped => error!("Reading IO after server stopped"),
                     MCServerState::Starting => {
                         if READY_REGEX.is_match(buf) {
+                            debug!("Setting server state to Running");
                             *current_state_lock = MCServerState::Running;
                         }
                     },
                     MCServerState::Running => {
                         if STOPPING_REGEX.is_match(buf) {
+                            debug!("Setting server state to Stopping");
                             *current_state_lock = MCServerState::Stopping;
                         }
                     },
