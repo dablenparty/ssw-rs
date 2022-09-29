@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 #[repr(u8)]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum MCVersionType {
     Release = 0,
@@ -15,7 +15,7 @@ pub enum MCVersionType {
     OldAlpha = 3,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MinecraftVersion {
     pub id: String,
@@ -25,6 +25,18 @@ pub struct MinecraftVersion {
     pub release_time: DateTime<Utc>,
     pub sha1: String,
     pub compliance_level: u8,
+}
+
+impl PartialOrd for MinecraftVersion {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for MinecraftVersion {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.release_time.cmp(&other.release_time)
+    }
 }
 
 /// Gets the required version of Java for the given Minecraft version.
