@@ -14,7 +14,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::minecraft::DEFAULT_MC_PORT;
-use crate::Event;
+use crate::SswEvent;
 
 enum ConnectionManagerEvent {
     Connected(SocketAddr, JoinHandle<()>),
@@ -33,7 +33,7 @@ enum ConnectionManagerEvent {
 pub async fn run_proxy(
     ssw_port: u16,
     cancellation_token: CancellationToken,
-    tx: Sender<Event>,
+    tx: Sender<SswEvent>,
     mut rx: Receiver<u16>,
 ) -> io::Result<()> {
     debug!("Starting proxy on port {}", ssw_port);
@@ -55,7 +55,7 @@ pub async fn run_proxy(
         let (client, client_addr) = listener.accept().await?;
         debug!("Accepted connection from {}", client_addr);
 
-        let mc_port = if let Err(e) = tx.send(Event::McPortRequest).await {
+        let mc_port = if let Err(e) = tx.send(SswEvent::McPortRequest).await {
             error!("Failed to request MC port: {}", e);
             error!("Using default port {}", DEFAULT_MC_PORT);
             DEFAULT_MC_PORT

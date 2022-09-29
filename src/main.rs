@@ -36,7 +36,7 @@ use util::{create_dir_if_not_exists, get_exe_parent_dir};
 use crate::proxy::run_proxy;
 
 #[derive(Debug)]
-pub enum Event {
+pub enum SswEvent {
     StdinMessage(String),
     McPortRequest,
 }
@@ -84,7 +84,7 @@ async fn main() -> io::Result<()> {
         }
     }
     let port = mc_server.ssw_config.ssw_port;
-    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<Event>(100);
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<SswEvent>(100);
     let (proxy_handle, proxy_cancel_token, proxy_tx) = start_proxy_task(port, event_tx.clone());
     //? separate cancel token
     let stdin_handle = start_stdin_task(event_tx.clone(), proxy_cancel_token.clone());
@@ -108,7 +108,7 @@ async fn main() -> io::Result<()> {
 async fn run_ssw_event_loop(
     mc_server: &mut MinecraftServer,
     proxy_cancel_token: CancellationToken,
-    event_rx: &mut Receiver<Event>,
+    event_rx: &mut Receiver<SswEvent>,
     proxy_tx: Sender<u16>,
 ) {
     loop {
@@ -123,7 +123,7 @@ async fn run_ssw_event_loop(
             .lock()
             .expect("Failed to lock on server status");
         match event {
-            Event::StdinMessage(msg) => {
+            SswEvent::StdinMessage(msg) => {
                 let command_with_args: Vec<&str> = msg.split_whitespace().collect();
                 let command = command_with_args[0];
                 match command {
@@ -191,7 +191,7 @@ async fn run_ssw_event_loop(
                     }
                 }
             }
-            Event::McPortRequest => {
+            SswEvent::McPortRequest => {
                 // this really shouldn't be a problem, but just in case
                 let port: u16 = mc_server
                     .get_property("server-port")
@@ -354,7 +354,7 @@ fn print_help() {
 /// returns: `(JoinHandle<()>, CancellationToken)`
 fn start_proxy_task(
     port: u16,
-    event_tx: Sender<Event>,
+    event_tx: Sender<SswEvent>,
 ) -> (JoinHandle<()>, CancellationToken, Sender<u16>) {
     let token = CancellationToken::new();
     let cloned_token = token.clone();
@@ -388,7 +388,7 @@ fn start_proxy_task(
 /// * `cancel_token` - The cancellation token to use
 ///
 /// returns: `JoinHandle<()>`
-fn start_stdin_task(tx: Sender<Event>, cancel_token: CancellationToken) -> JoinHandle<()> {
+fn start_stdin_task(tx: Sender<SswEvent>, cancel_token: CancellationToken) -> JoinHandle<()> {
     let mut stdin_reader = tokio::io::BufReader::new(tokio::io::stdin());
     tokio::spawn(async move {
         loop {
@@ -407,7 +407,7 @@ fn start_stdin_task(tx: Sender<Event>, cancel_token: CancellationToken) -> JoinH
                         break;
                     }
                     let is_exit_command = buf.trim() == EXIT_COMMAND;
-                    if let Err(e) = tx.send(Event::StdinMessage(buf)).await {
+                    if let Err(e) = tx.send(SswEvent::StdinMessage(buf)).await {
                         error!("Error sending message from stdin task: {}", e);
                     }
                     if is_exit_command {
