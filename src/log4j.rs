@@ -47,7 +47,7 @@ pub async fn patch_log4j(mc_server: &mut MinecraftServer) -> ssw_error::Result<(
         .find(|version| version.id == *server_version_id)
         .unwrap();
     let (arg, url) = if server_version >= get_version_by_id(&versions, "1.18.1") {
-        // no patch needed
+        // no patch needed (too new)
         (None, None)
     } else if server_version >= get_version_by_id(&versions, "1.17") {
         (Some("-Dlog4j2.formatMsgNoLookups=true"), None)
@@ -60,6 +60,7 @@ pub async fn patch_log4j(mc_server: &mut MinecraftServer) -> ssw_error::Result<(
     {
         (Some("-Dlog4j.configurationFile=log4j2_17-111.xml"), Some("https://launcher.mojang.com/v1/objects/4bb89a97a66f350bc9f73b3ca8509632682aea2e/log4j2_17-111.xml"))
     } else {
+        // no patch needed (too old)
         (None, None)
     };
 
@@ -76,8 +77,8 @@ pub async fn patch_log4j(mc_server: &mut MinecraftServer) -> ssw_error::Result<(
 
     if let Some(arg) = arg {
         let arg = arg.to_string();
-        if !mc_server.ssw_config.extra_args.contains(&arg) {
-            mc_server.ssw_config.extra_args.push(arg);
+        if !mc_server.ssw_config.jvm_args.contains(&arg) {
+            mc_server.ssw_config.jvm_args.push(arg);
         }
     }
 

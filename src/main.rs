@@ -35,12 +35,17 @@ use util::{create_dir_if_not_exists, get_exe_parent_dir};
 
 use crate::proxy::run_proxy;
 
+/// Represents an event that can be sent to the main thread.
 #[derive(Debug)]
 pub enum SswEvent {
+    /// Sent when a string is read from `stdin`.
     StdinMessage(String),
+    /// Sent when the proxy thread needs to know the Minecraft port
     McPortRequest,
 }
 
+/// Simple Server Wrapper (SSW) is a simple wrapper for Minecraft servers, allowing for easy
+/// automation of some simple server management features.
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct CommandLineArgs {
@@ -211,6 +216,15 @@ async fn run_ssw_event_loop(
     }
 }
 
+/// Gets or sets the SSW proxy port.
+/// The current implementation requires the whole application to be restarted to apply the change.
+///
+/// # Arguments
+///
+/// * `command_with_args`: the command and its arguments
+/// * `mc_server`: the Minecraft server instance
+///
+/// returns: `ssw_error::Result<()>`
 async fn get_or_set_ssw_port(
     command_with_args: &[&str],
     mc_server: &mut MinecraftServer,

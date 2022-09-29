@@ -30,6 +30,10 @@ enum ConnectionManagerEvent {
 ///
 /// * `ssw_port` - The port for the proxy to listen on
 /// * `cancellation_token` - The cancellation token to use
+///
+/// # Errors
+///
+/// An error is returned if the TCP listener fails to bind to the port or accept a new connection.
 pub async fn run_proxy(
     ssw_port: u16,
     cancellation_token: CancellationToken,

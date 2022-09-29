@@ -12,6 +12,7 @@ const MANIFEST_V2_LINK: &str = "https://launchermeta.mojang.com/mc/game/version_
 /// This struct is not a complete representation of the manifest, but only the parts that are needed.
 #[derive(Deserialize)]
 struct VersionManifestV2 {
+    /// The complete list of all Minecraft versions.
     versions: Vec<MinecraftVersion>,
 }
 
@@ -20,6 +21,8 @@ struct VersionManifestV2 {
 /// - Windows: `%APPDATA%/.minecraft/versions/version_manifest_v2.json`
 /// - Mac:  `~/Library/Application Support/minecraft/versions/version_manifest_v2.json`
 /// - Linux:   `~/.minecraft/versions/version_manifest_v2.json`
+///
+/// returns: `PathBuf`
 fn get_manifest_location() -> PathBuf {
     const MANIFEST_NAME: &str = "version_manifest_v2.json";
     #[cfg(windows)]
@@ -53,6 +56,10 @@ fn get_manifest_location() -> PathBuf {
 }
 
 /// Refreshes the launcher manifest by downloading the latest version of it from [Mojang](https://launchermeta.mojang.com/mc/game/version_manifest_v2.json).
+///
+/// # Errors
+///
+/// An error will be returned if the manifest fails to download or write.
 pub async fn refresh_manifest() -> ssw_error::Result<()> {
     debug!(
         "Downloading Minecraft version manifest from {}",
@@ -66,6 +73,10 @@ pub async fn refresh_manifest() -> ssw_error::Result<()> {
 }
 
 /// Loads the launcher manifest from the local file system.
+///
+/// # Errors
+///
+/// An error will be returned if the manifest fails to load or parse.
 pub async fn load_versions() -> io::Result<Vec<MinecraftVersion>> {
     let manifest_location = get_manifest_location();
     debug!(

@@ -28,6 +28,7 @@ use crate::{
     util::{async_create_dir_if_not_exists, get_java_version, path_to_str},
 };
 
+/// Represents the state of a Minecraft server
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MCServerState {
@@ -43,15 +44,25 @@ impl Default for MCServerState {
     }
 }
 
+// TODO: auto-restart after crash
+/// The SSW server configuration
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SswConfig {
+    /// How much memory to allocate to the server in gigabytes
     pub memory_in_gb: f32,
+    /// How long to wait (in hours) before restarting the server
     pub restart_timeout: f32,
+    /// How long to wait (in minutes) with no players before shutting
+    /// down the server
     pub shutdown_timeout: f32,
+    /// The port to use for the SSW proxy
     pub ssw_port: u16,
+    /// The version string for the associated Minecraft server
     pub mc_version: Option<String>,
+    /// The required Java version string for the associated Minecraft server
     pub required_java_version: String,
-    pub extra_args: Vec<String>,
+    /// Extra arguments to pass to the JVM when starting the server
+    pub jvm_args: Vec<String>,
 }
 
 impl Default for SswConfig {
@@ -63,7 +74,7 @@ impl Default for SswConfig {
             ssw_port: 25566,
             mc_version: None,
             required_java_version: "17.0".to_string(),
-            extra_args: Vec::new(),
+            jvm_args: Vec::new(),
         }
     }
 }
@@ -80,7 +91,6 @@ impl SswConfig {
     /// An error may occur when reading or writing the config file, as well as in the serialization/deserialization process.
     ///
     /// returns: `serde_json::Result<SswConfig>`
-    ///
     pub async fn new(config_path: &Path) -> serde_json::Result<Self> {
         if config_path.exists() {
             debug!("Found existing SSW config");
@@ -116,21 +126,34 @@ impl SswConfig {
     /// # Arguments
     ///
     /// * `config_path` - The path to the config file. If it does not exist, it will be created with default values.
+    ///
+    /// # Errors
+    ///
+    /// An error may occur when writing the config file, as well as in the serialization process.
     pub async fn save(&self, config_path: &Path) -> io::Result<()> {
         let config_string = serde_json::to_string_pretty(&self)?;
         tokio::fs::write(config_path, config_string).await
     }
 }
 
+/// The default port used by Minecraft servers
 pub const DEFAULT_MC_PORT: u16 = 25565;
+
 type MCServerProperties = HashMap<String, Value>;
 
+/// Represents a Minecraft server
 pub struct MinecraftServer {
+    /// Thread-safe mutex lock on the server state as it needs to be accessed by multiple threads
     state: Arc<Mutex<MCServerState>>,
+    /// A join handle to the exit handler task
     exit_handler: Option<JoinHandle<()>>,
+    /// A sender used to send messages to the servers stdin
     server_stdin_sender: Option<Sender<String>>,
+    /// Path to the Minecraft server jar
     jar_path: PathBuf,
+    /// Deserialized server.properties file
     properties: Option<MCServerProperties>,
+    /// The SSW server configuration
     pub ssw_config: SswConfig,
 }
 
@@ -162,6 +185,10 @@ impl MinecraftServer {
     }
 
     /// Stop the server if it is running
+    ///
+    /// # Errors
+    ///
+    /// An error may occur if sending the stop command to the server fails
     pub async fn stop(&self) -> Result<(), SendError<String>> {
         self.send_command("stop".to_string()).await
     }
@@ -171,10 +198,15 @@ impl MinecraftServer {
     /// # Arguments
     ///
     /// * `command` - The command to send to the server
+    ///
+    /// # Errors
+    ///
+    /// An error may occur if sending the command to the server fails
     pub async fn send_command(&self, command: String) -> Result<(), SendError<String>> {
         if let Some(ref sender) = self.server_stdin_sender {
             sender.send(command).await
         } else {
+            warn!("Attempted to send command to stopped server");
             Ok(())
         }
     }
@@ -217,6 +249,11 @@ impl MinecraftServer {
         save_properties(&props_path, self.properties.as_ref().unwrap()).await
     }
 
+    /// Saves this server's SSW config to the config file
+    ///
+    /// # Errors
+    ///
+    /// An error may occur when writing the config file or in the serialization process.
     pub async fn save_config(&self) -> io::Result<()> {
         let config_path = self.get_config_path();
         self.ssw_config.save(&config_path).await
@@ -249,6 +286,14 @@ impl MinecraftServer {
     }
 
     /// Loads the version of the Minecraft server and its required Java version.
+    ///
+    /// # Errors
+    ///
+    /// An error may occur if the server jar is not found or if reading the version manifest fails.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the server jar somehow does not have a parent component.
     pub async fn load_version(&mut self) -> io::Result<()> {
         let mc_version_string = try_read_version_from_jar(
             self.jar_path()
@@ -294,7 +339,11 @@ impl MinecraftServer {
     ///
     /// # Errors
     ///
-    /// An error can occur when loading the config or when spawning the child process.
+    /// An error can occur when:
+    /// - A Java executable cannot be found
+    /// - The server jar cannot be found, read, or its path has an invalid format
+    /// - Patching Log4J fails
+    /// - The server process cannot be spawned
     pub async fn run(&mut self) -> ssw_error::Result<()> {
         let java_executable = self.get_java_executable().await?;
         self.check_java_version(&java_executable).await?;
@@ -483,6 +532,7 @@ impl MinecraftServer {
         self.state.clone()
     }
 
+    /// Gets a reference to the servers JAR path.
     pub fn jar_path(&self) -> &Path {
         self.jar_path.as_path()
     }

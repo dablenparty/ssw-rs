@@ -5,6 +5,7 @@ use log::warn;
 use serde::Deserialize;
 use serde_json::Value;
 
+/// A Minecraft version type
 #[repr(u8)]
 #[derive(Debug, Deserialize, PartialEq, Eq, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
@@ -15,15 +16,24 @@ pub enum MCVersionType {
     OldAlpha = 3,
 }
 
+/// A Minecraft version
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MinecraftVersion {
+    /// The ID of the version (e.g., `1.16.1`)
     pub id: String,
+    /// The type of the version
     pub r#type: MCVersionType,
+    /// A URL to the version's JSON file
     pub url: String,
+    /// A time field, not sure what this is for
     pub time: DateTime<Utc>,
+    /// The time the version was released
     pub release_time: DateTime<Utc>,
+    /// SHA1 hash of the version's JSON file
     pub sha1: String,
+    /// The compliance level of the version. From what I can tell, this is used
+    /// to determine if the version is compatible with player safety features
     pub compliance_level: u8,
 }
 
@@ -45,7 +55,11 @@ impl Ord for MinecraftVersion {
 ///
 /// # Arguments
 ///
-/// * `mc_version`: the Minecraft version to get the required Java version forƒ
+/// * `mc_version`: the Minecraft version to get the required Java version for
+///
+/// # Errors
+///
+/// An error will be returned if the API call fails or if it returns an invalid response.
 pub async fn get_required_java_version(mc_version: &MinecraftVersion) -> reqwest::Result<String> {
     let response: Value = reqwest::get(&mc_version.url).await?.json().await?;
     let major_version = response["javaVersion"]["majorVersion"]
