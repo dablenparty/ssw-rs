@@ -411,6 +411,7 @@ impl MinecraftServer {
         let java_version = get_java_version(java_location).await?;
         info!("Found Java version: {}", java_version);
         // compare version number in the order of major, minor, patch
+        // unwrap is safe here because the regex will always match (unless Java changes their version format, which they haven't in a long time)
         for (ver, req) in java_version
             .split('.')
             .zip(self.ssw_config.required_java_version.split('.'))
@@ -494,16 +495,16 @@ impl MinecraftServer {
 /// * `server_port` - The Minecraft server port.
 ///
 /// returns: `bool`
-fn validate_port(ssw_port: u16, server_port: &Value) -> bool {
+fn validate_port(ssw_port: u16, server_port_value: &Value) -> bool {
     let mut port_is_valid = true;
-    let _: u16 = server_port.as_u64().map_or_else(
+    let server_port: u16 = server_port_value.as_u64().map_or_else(
         || {
             debug!("server.properties server-port does not exist");
             DEFAULT_MC_PORT
         },
         |v| {
             v.try_into().unwrap_or_else(|_| {
-                warn!("Invalid Minecraft server port: {}", server_port);
+                warn!("Invalid Minecraft server port: {}", server_port_value);
                 warn!("Valid ports are in the range 0-65535");
                 if ssw_port == DEFAULT_MC_PORT {
                     error!("The SSW port ({}) is the same as the default Minecraft port", ssw_port);
@@ -511,10 +512,18 @@ fn validate_port(ssw_port: u16, server_port: &Value) -> bool {
                     error!("Please change the server port in server.properties to fix this");
                 }
                 port_is_valid = false;
-                0
+                DEFAULT_MC_PORT
             })
         },
     );
+    if ssw_port == server_port {
+        error!(
+            "The SSW port ({}) is the same as the Minecraft server port ({})",
+            ssw_port, server_port
+        );
+        error!("Change one of the ports to fix this");
+        port_is_valid = false;
+    }
     port_is_valid
 }
 

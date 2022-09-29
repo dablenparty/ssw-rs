@@ -131,7 +131,7 @@ async fn run_ssw_event_loop(
                     "start" => {
                         if current_server_status == minecraft::MCServerState::Stopped {
                             if let Err(e) = mc_server.run().await {
-                                error!("Failed to start server: {:?}", e);
+                                error!("Failed to start server: {}", e);
                                 if let SswError::MissingMinecraftVersion = e {
                                     error!("Use the 'mc-version' command to set the Minecraft version of the server.");
                                 }
@@ -158,12 +158,25 @@ async fn run_ssw_event_loop(
                     "help" if current_server_status != minecraft::MCServerState::Running => {
                         print_help();
                     }
-                    "mc-port" => get_or_set_mc_port(&command_with_args, mc_server).await,
+                    "mc-port" => {
+                        if let Err(e) = get_or_set_mc_port(&command_with_args, mc_server).await {
+                            error!("Failed to get or set Minecraft port: {}", e);
+                        } else {
+                            info!("Successfully set Minecraft port");
+                        }
+                    }
                     "mc-version" => {
                         if let Err(e) = get_or_set_mc_version(&command_with_args, mc_server).await {
                             error!("Failed to get or set Minecraft version: {}", e);
                         } else {
                             info!("Successfully set Minecraft version.");
+                        }
+                    }
+                    "ssw-port" => {
+                        if let Err(e) = get_or_set_ssw_port(&command_with_args, mc_server).await {
+                            error!("Failed to get or set SSW port: {}", e);
+                        } else {
+                            info!("Successfully set SSW port. Please restart the application to apply the changes.");
                         }
                     }
                     _ => {
@@ -197,6 +210,21 @@ async fn run_ssw_event_loop(
             }
         }
     }
+}
+
+async fn get_or_set_ssw_port(
+    command_with_args: &[&str],
+    mc_server: &mut MinecraftServer,
+) -> ssw_error::Result<()> {
+    if command_with_args.len() == 1 {
+        info!("ssw-port: {}", mc_server.ssw_config.ssw_port);
+    } else {
+        let port = command_with_args[1].parse::<u16>()?;
+        mc_server.ssw_config.ssw_port = port;
+        mc_server.save_config().await?;
+        info!("ssw-port set to {}", mc_server.ssw_config.ssw_port);
+    }
+    Ok(())
 }
 
 /// Gets or sets the Minecraft server version based on the command line arguments.
@@ -251,27 +279,21 @@ async fn get_or_set_mc_version(
 /// * `mc_server`: the Minecraft server instance
 ///
 /// returns: `()`
-async fn get_or_set_mc_port(command_with_args: &[&str], mc_server: &mut MinecraftServer) {
+async fn get_or_set_mc_port(
+    command_with_args: &[&str],
+    mc_server: &mut MinecraftServer,
+) -> ssw_error::Result<()> {
     if let Some(arg) = command_with_args.get(1) {
-        let _: u16 = match arg.parse() {
-            Ok(port) => port,
-            Err(e) => {
-                error!("Invalid Minecraft port: {}", e);
-                return;
-            }
-        };
-        mc_server.set_property(
-            "server-port".to_string(),
-            serde_json::from_str(arg).unwrap(),
-        );
+        let _: u16 = arg.parse()?;
+        mc_server.set_property("server-port".to_string(), serde_json::from_str(arg)?);
         if let Err(e) = mc_server.save_properties().await {
-            warn!("Failed to save properties: {}", e);
             if e.kind() == io::ErrorKind::NotFound {
+                warn!("Failed to save properties: {}", e);
                 warn!("server.properties not found, attempting to load it");
                 mc_server.load_properties().await;
+            } else {
+                return Err(e.into());
             }
-        } else {
-            info!("Minecraft port now set to {}", arg);
         }
     } else {
         // this just reports the port that the server is using, it doesn't check validity
@@ -282,6 +304,7 @@ async fn get_or_set_mc_port(command_with_args: &[&str], mc_server: &mut Minecraf
             });
         info!("Current MC port: {}", port);
     }
+    Ok(())
 }
 
 /// Prints the SSW help message to the console
@@ -298,6 +321,7 @@ fn print_help() {
             "mc-version [version]",
             "manually show or set the Minecraft server version",
         ),
+        ("ssw-port [port]", "show or set the SSW port"),
     ];
     // safe to unwrap as this iterator should never be empty
     let max_command_len = commands

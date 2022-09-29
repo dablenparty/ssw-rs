@@ -1,16 +1,18 @@
-use std::{error, fmt, io};
+use std::{error, fmt, io, num};
 
 /// An error wrapper type used across the entire crate, usually where multiple error types are
 /// returned.
 #[derive(Debug)]
 pub enum SswError {
-    IoError(io::Error),
-    ReqwestError(reqwest::Error),
-    LoggingError(log::SetLoggerError),
     /// Raised when the second argument, the actual version string, is lower than the first argument,
     /// the minimum required version string.
     BadJavaVersion(String, String),
+    IoError(io::Error),
+    JsonError(serde_json::Error),
+    LoggingError(log::SetLoggerError),
     MissingMinecraftVersion,
+    ParseIntError(num::ParseIntError),
+    ReqwestError(reqwest::Error),
 }
 
 pub type Result<T> = std::result::Result<T, SswError>;
@@ -27,6 +29,8 @@ impl fmt::Display for SswError {
                 actual, required
             ),
             SswError::MissingMinecraftVersion => write!(f, "Minecraft version not specified"),
+            SswError::ParseIntError(e) => write!(f, "Parse error: {}", e),
+            SswError::JsonError(e) => write!(f, "JSON error: {}", e),
         }
     }
 }
@@ -48,5 +52,17 @@ impl From<reqwest::Error> for SswError {
 impl From<log::SetLoggerError> for SswError {
     fn from(e: log::SetLoggerError) -> Self {
         SswError::LoggingError(e)
+    }
+}
+
+impl From<num::ParseIntError> for SswError {
+    fn from(e: num::ParseIntError) -> Self {
+        SswError::ParseIntError(e)
+    }
+}
+
+impl From<serde_json::Error> for SswError {
+    fn from(e: serde_json::Error) -> Self {
+        SswError::JsonError(e)
     }
 }
