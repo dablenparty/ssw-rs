@@ -118,7 +118,6 @@ async fn run_ssw_event_loop(
             break;
         }
         let event = event.unwrap();
-        debug!("Received event: {:?}", event);
         let current_server_status = *mc_server
             .status()
             .lock()
