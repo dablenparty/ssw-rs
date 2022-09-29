@@ -1,6 +1,7 @@
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+mod log4j;
 mod manifest;
 mod mc_version;
 mod minecraft;
