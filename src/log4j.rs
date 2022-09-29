@@ -2,7 +2,9 @@ use std::io;
 
 use log::{debug, info};
 
-use crate::{manifest::load_versions, mc_version::MinecraftVersion, minecraft::MinecraftServer};
+use crate::{
+    manifest::load_versions, mc_version::MinecraftVersion, minecraft::MinecraftServer, ssw_error,
+};
 
 /// Helper function to get a Minecraft version from a version string.
 /// It is very important to note that this function assumes the version string is valid.
@@ -31,7 +33,7 @@ fn get_version_by_id<'a>(versions: &'a [MinecraftVersion], id: &str) -> &'a Mine
 /// - The server version is not specified
 /// - The patch file fails to download or write
 /// - The server config fails to save
-pub async fn patch_log4j(mc_server: &mut MinecraftServer) -> io::Result<()> {
+pub async fn patch_log4j(mc_server: &mut MinecraftServer) -> ssw_error::Result<()> {
     let versions = load_versions().await?;
     let server_version_id = mc_server.ssw_config.mc_version.as_ref().ok_or_else(|| {
         io::Error::new(
@@ -66,10 +68,8 @@ pub async fn patch_log4j(mc_server: &mut MinecraftServer) -> io::Result<()> {
     if let Some(url) = url {
         let file_name = url.split('/').last().unwrap();
         let log4j_config_path = mc_server.jar_path().with_file_name(file_name);
-        // TODO: SSW Error Type
         if !log4j_config_path.exists() {
-            // DO NOT UNWRAP THIS
-            let text = reqwest::get(url).await.unwrap().text().await.unwrap();
+            let text = reqwest::get(url).await?.text().await?;
             tokio::fs::write(&log4j_config_path, text).await?;
         }
     }

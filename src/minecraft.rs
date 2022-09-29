@@ -24,6 +24,7 @@ use crate::{
     log4j::patch_log4j,
     manifest::load_versions,
     mc_version::{get_required_java_version, try_read_version_from_jar},
+    ssw_error,
     util::{async_create_dir_if_not_exists, get_java_version, path_to_str},
 };
 
@@ -294,7 +295,7 @@ impl MinecraftServer {
     /// # Errors
     ///
     /// An error can occur when loading the config or when spawning the child process.
-    pub async fn run(&mut self) -> io::Result<()> {
+    pub async fn run(&mut self) -> ssw_error::Result<()> {
         let java_executable = self.get_java_executable().await?;
         self.check_java_version(&java_executable).await?;
         info!("Loading SSW config...");
@@ -310,7 +311,8 @@ impl MinecraftServer {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "Invalid Minecraft server port",
-                ));
+                )
+                .into());
             }
         }
         patch_log4j(self).await?;

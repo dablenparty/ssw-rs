@@ -431,8 +431,8 @@ fn zip_logs() -> io::Result<PathBuf> {
 ///
 /// * `level_filter` - The log level filter to use
 ///
-/// returns: `Result<(), Box<dyn std::error::Error>>`
-fn init_logger(level_filter: LevelFilter) -> Result<(), Box<dyn std::error::Error>> {
+/// returns: `ssw_error::Result<()>`
+fn init_logger(level_filter: LevelFilter) -> ssw_error::Result<()> {
     let config = simplelog::ConfigBuilder::new()
         .set_time_format_custom(format_description!("[[[hour]:[minute]:[second]]"))
         .set_thread_mode(ThreadLogMode::Both)

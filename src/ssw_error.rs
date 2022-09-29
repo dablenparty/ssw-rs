@@ -9,6 +9,8 @@ pub enum SswError {
     LoggingError(log::SetLoggerError),
 }
 
+pub type Result<T> = std::result::Result<T, SswError>;
+
 impl fmt::Display for SswError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

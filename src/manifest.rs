@@ -1,9 +1,9 @@
-use std::{error, io, path::PathBuf};
+use std::{io, path::PathBuf};
 
 use log::debug;
 use serde::Deserialize;
 
-use crate::mc_version::MinecraftVersion;
+use crate::{mc_version::MinecraftVersion, ssw_error};
 
 const MANIFEST_V2_LINK: &str = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
 
@@ -53,7 +53,7 @@ fn get_manifest_location() -> PathBuf {
 }
 
 /// Refreshes the launcher manifest by downloading the latest version of it from [Mojang](https://launchermeta.mojang.com/mc/game/version_manifest_v2.json).
-pub async fn refresh_manifest() -> Result<(), Box<dyn error::Error>> {
+pub async fn refresh_manifest() -> ssw_error::Result<()> {
     debug!(
         "Downloading Minecraft version manifest from {}",
         MANIFEST_V2_LINK
