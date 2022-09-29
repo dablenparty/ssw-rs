@@ -6,6 +6,7 @@ mod manifest;
 mod mc_version;
 mod minecraft;
 mod proxy;
+mod ssw_error;
 mod util;
 
 use std::{
