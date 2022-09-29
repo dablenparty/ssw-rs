@@ -21,6 +21,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    log4j::patch_log4j,
     manifest::load_versions,
     mc_version::{get_required_java_version, try_read_version_from_jar},
     util::{async_create_dir_if_not_exists, get_java_version, path_to_str},
@@ -215,6 +216,11 @@ impl MinecraftServer {
         save_properties(&props_path, self.properties.as_ref().unwrap()).await
     }
 
+    pub async fn save_config(&self) -> io::Result<()> {
+        let config_path = self.get_config_path();
+        self.ssw_config.save(&config_path).await
+    }
+
     /// Get a reference to a property from server.properties
     ///
     /// # Arguments
@@ -307,13 +313,7 @@ impl MinecraftServer {
                 ));
             }
         }
-        // TODO: patch Log4j
-        let _mc_version = self.ssw_config.mc_version.as_ref().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Minecraft version is not specified",
-            )
-        })?;
+        patch_log4j(self).await?;
         let memory_in_mb = self.ssw_config.memory_in_gb * 1024.0;
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let memory_arg = format!("-Xmx{}M", memory_in_mb.abs() as u32);
@@ -325,6 +325,7 @@ impl MinecraftServer {
             path_to_str(&self.jar_path)?,
             "nogui",
         ];
+        debug!("Running Minecraft server with args: {:?}", proc_args);
         {
             *self.state.lock().unwrap() = MCServerState::Starting;
         }
