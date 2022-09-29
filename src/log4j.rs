@@ -17,6 +17,20 @@ fn get_version_by_id<'a>(versions: &'a [MinecraftVersion], id: &str) -> &'a Mine
     versions.iter().find(|v| v.id == id).unwrap()
 }
 
+/// Patch the Log4j vulnerability in a Minecraft server.
+/// More information can be found on the [Minecraft website](https://help.minecraft.net/hc/en-us/articles/4416199399693-Security-Vulnerability-in-Minecraft-Java-Edition).
+///
+/// # Arguments
+///
+/// * `mc_server` - The Minecraft server to patch.
+///
+/// # Errors
+///
+/// An error will be returned if one of the following happens:
+/// - The version manifest cannot be loaded
+/// - The server version is not specified
+/// - The patch file fails to download or write
+/// - The server config fails to save
 pub async fn patch_log4j(mc_server: &mut MinecraftServer) -> io::Result<()> {
     let versions = load_versions().await?;
     let server_version_id = mc_server.ssw_config.mc_version.as_ref().ok_or_else(|| {
