@@ -289,7 +289,7 @@ fn print_help() {
         (EXIT_COMMAND, "stops the Minecraft server and exits SSW"),
         ("mc-port [port]", "show or set the Minecraft server port"),
         (
-            "mc-version",
+            "mc-version [version]",
             "manually show or set the Minecraft server version",
         ),
     ];
