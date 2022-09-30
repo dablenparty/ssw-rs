@@ -1,10 +1,7 @@
 use log::{debug, info};
 
 use crate::{
-    manifest::load_versions,
-    mc_version::MinecraftVersion,
-    minecraft::MinecraftServer,
-    ssw_error::{self, SswError},
+    manifest::load_versions, mc_version::MinecraftVersion, minecraft::MinecraftServer, ssw_error,
 };
 
 /// Helper function to get a Minecraft version from a version string.
@@ -40,7 +37,7 @@ pub async fn patch_log4j(mc_server: &mut MinecraftServer) -> ssw_error::Result<(
         .ssw_config
         .mc_version
         .as_ref()
-        .ok_or(SswError::MissingMinecraftVersion)?;
+        .ok_or(ssw_error::Error::MissingMinecraftVersion)?;
     // unwrap is safe because the version id is validated when it is assigned
     let server_version = versions
         .iter()

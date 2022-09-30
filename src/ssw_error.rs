@@ -3,7 +3,7 @@ use std::{error, fmt, io, num};
 /// An error wrapper type used across the entire crate, usually where multiple error types are
 /// returned.
 #[derive(Debug)]
-pub enum SswError {
+pub enum Error {
     /// Raised when the second argument, the actual version string, is lower than the first argument,
     /// the minimum required version string.
     BadJavaVersion(String, String),
@@ -15,54 +15,54 @@ pub enum SswError {
     ReqwestError(reqwest::Error),
 }
 
-pub type Result<T> = std::result::Result<T, SswError>;
+pub type Result<T> = std::result::Result<T, Error>;
 
-impl fmt::Display for SswError {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SswError::IoError(e) => write!(f, "IO error: {}", e),
-            SswError::ReqwestError(e) => write!(f, "Reqwest error: {}", e),
-            SswError::LoggingError(e) => write!(f, "Logging error: {}", e),
-            SswError::BadJavaVersion(required, actual) => write!(
+            Error::IoError(e) => write!(f, "IO error: {}", e),
+            Error::ReqwestError(e) => write!(f, "Reqwest error: {}", e),
+            Error::LoggingError(e) => write!(f, "Logging error: {}", e),
+            Error::BadJavaVersion(required, actual) => write!(
                 f,
                 "Java version '{}' is less than the required '{}'",
                 actual, required
             ),
-            SswError::MissingMinecraftVersion => write!(f, "Minecraft version not specified"),
-            SswError::ParseIntError(e) => write!(f, "Parse error: {}", e),
-            SswError::JsonError(e) => write!(f, "JSON error: {}", e),
+            Error::MissingMinecraftVersion => write!(f, "Minecraft version not specified"),
+            Error::ParseIntError(e) => write!(f, "Parse error: {}", e),
+            Error::JsonError(e) => write!(f, "JSON error: {}", e),
         }
     }
 }
 
-impl error::Error for SswError {}
+impl error::Error for Error {}
 
-impl From<io::Error> for SswError {
+impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
-        SswError::IoError(e)
+        Error::IoError(e)
     }
 }
 
-impl From<reqwest::Error> for SswError {
+impl From<reqwest::Error> for Error {
     fn from(e: reqwest::Error) -> Self {
-        SswError::ReqwestError(e)
+        Error::ReqwestError(e)
     }
 }
 
-impl From<log::SetLoggerError> for SswError {
+impl From<log::SetLoggerError> for Error {
     fn from(e: log::SetLoggerError) -> Self {
-        SswError::LoggingError(e)
+        Error::LoggingError(e)
     }
 }
 
-impl From<num::ParseIntError> for SswError {
+impl From<num::ParseIntError> for Error {
     fn from(e: num::ParseIntError) -> Self {
-        SswError::ParseIntError(e)
+        Error::ParseIntError(e)
     }
 }
 
-impl From<serde_json::Error> for SswError {
+impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Self {
-        SswError::JsonError(e)
+        Error::JsonError(e)
     }
 }

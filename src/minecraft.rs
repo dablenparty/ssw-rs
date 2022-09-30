@@ -24,7 +24,7 @@ use crate::{
     log4j::patch_log4j,
     manifest::load_versions,
     mc_version::{get_required_java_version, try_read_version_from_jar},
-    ssw_error::{self, SswError},
+    ssw_error,
     util::{async_create_dir_if_not_exists, get_java_version, path_to_str},
 };
 
@@ -476,7 +476,7 @@ impl MinecraftServer {
                 break;
             }
             // version is too low
-            return Err(SswError::BadJavaVersion(
+            return Err(ssw_error::Error::BadJavaVersion(
                 self.ssw_config.required_java_version.clone(),
                 java_version,
             ));
