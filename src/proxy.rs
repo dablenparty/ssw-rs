@@ -10,6 +10,7 @@ use tokio::{
     select,
     sync::mpsc::{Receiver, Sender},
     task::JoinHandle,
+    time::Duration,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -40,6 +41,7 @@ pub async fn run_proxy(
     tx: Sender<SswEvent>,
     mut rx: Receiver<u16>,
 ) -> io::Result<()> {
+    const REAL_CONNECTION_SECS: u64 = 5;
     debug!("Starting proxy on port {}", ssw_port);
     // TODO: optional command line arg for IP
     let addr = format!("{}:{}", "0.0.0.0", ssw_port);
@@ -76,6 +78,18 @@ pub async fn run_proxy(
         let tx_clone = connection_manager_tx.clone();
         let connection_token = cancellation_token.clone();
         let connection_handle = tokio::spawn(async move {
+            // this isn't necessarily needed, but it covers the bases
+            let conn_timer_token = connection_token.clone();
+            let real_conn_timer = tokio::spawn(async move {
+                select! {
+                    _ = tokio::time::sleep(Duration::from_secs(REAL_CONNECTION_SECS)) => {
+                        debug!("Real connection accepted, cancelling shutdown timer");
+                    }
+                    _ = conn_timer_token.cancelled() => {
+                        debug!("Cancelled real connection timer");
+                    }
+                }
+            });
             select! {
                 r = connection_handler(client, mc_port) => {
                     if let Err(e) = r {
@@ -83,16 +97,17 @@ pub async fn run_proxy(
                     } else {
                         debug!("Connection lost from {}", client_addr);
                     }
-                    if let Err(e) = tx_clone
-                        .send(ConnectionManagerEvent::Disconnected(client_addr))
-                        .await
-                    {
-                        error!("Error sending connection manager event: {}", e);
-                    }
                 },
                 _ = connection_token.cancelled() => {
                     debug!("Connection cancelled from {}", client_addr);
                 }
+            }
+            real_conn_timer.abort();
+            if let Err(e) = tx_clone
+                .send(ConnectionManagerEvent::Disconnected(client_addr))
+                .await
+            {
+                error!("Error sending connection manager event: {}", e);
             }
         });
         if let Err(e) = connection_manager_tx
