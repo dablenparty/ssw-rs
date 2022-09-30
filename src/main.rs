@@ -164,8 +164,6 @@ async fn run_ssw_event_loop(
                     "mc-port" => {
                         if let Err(e) = get_or_set_mc_port(&command_with_args, mc_server).await {
                             error!("Failed to get or set Minecraft port: {}", e);
-                        } else {
-                            info!("Successfully set Minecraft port");
                         }
                     }
                     "mc-version" => {
@@ -178,8 +176,6 @@ async fn run_ssw_event_loop(
                     "ssw-port" => {
                         if let Err(e) = get_or_set_ssw_port(&command_with_args, mc_server).await {
                             error!("Failed to get or set SSW port: {}", e);
-                        } else {
-                            info!("Successfully set SSW port. Please restart the application to apply the changes.");
                         }
                     }
                     _ => {
@@ -229,12 +225,15 @@ async fn get_or_set_ssw_port(
     mc_server: &mut MinecraftServer,
 ) -> ssw_error::Result<()> {
     if command_with_args.len() == 1 {
-        info!("ssw-port: {}", mc_server.ssw_config.ssw_port);
+        info!("Current SSW port: {}", mc_server.ssw_config.ssw_port);
     } else {
         let port = command_with_args[1].parse::<u16>()?;
         mc_server.ssw_config.ssw_port = port;
         mc_server.save_config().await?;
-        info!("ssw-port set to {}", mc_server.ssw_config.ssw_port);
+        info!(
+            "Successfully set SSW port to {}. Please restart the application to apply the changes.",
+            port
+        );
     }
     Ok(())
 }
@@ -306,6 +305,8 @@ async fn get_or_set_mc_port(
             } else {
                 return Err(e.into());
             }
+        } else {
+            info!("Successfully set Minecraft port");
         }
     } else {
         // this just reports the port that the server is using, it doesn't check validity
