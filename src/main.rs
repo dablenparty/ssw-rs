@@ -6,6 +6,7 @@ mod manifest;
 mod mc_version;
 mod minecraft;
 mod proxy;
+mod shutdown_task;
 mod ssw_error;
 mod util;
 
