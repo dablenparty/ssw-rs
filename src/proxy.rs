@@ -186,7 +186,7 @@ async fn connection_manager(
             && (shutdown_task.is_none() || shutdown_task.as_ref().unwrap().is_finished())
         {
             let current_state = { *server_state.lock().unwrap() };
-            if current_state == MCServerState::Running {
+            if current_state == MCServerState::Running && !shutdown_task_duration.is_zero() {
                 info!(
                     "Server is empty, setting shutdown timer for {:.2} minutes",
                     shutdown_task_duration.as_secs_f64() / 60.0
