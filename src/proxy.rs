@@ -78,14 +78,13 @@ pub async fn run_proxy(
         tokio::sync::mpsc::channel::<ConnectionManagerEvent>(100);
     // TODO: when error handling is improved, shut this down properly
     let connection_manager_token = cancellation_token.clone();
-    let factor = if cfg!(debug_assertions) { 2.0 } else { 60.0 };
     let _connection_manager_handle = tokio::spawn(connection_manager(
         connection_manager_rx,
         server_state_rx,
         ssw_event_tx.clone(),
         connection_manager_token,
         server_state,
-        Duration::from_secs_f64(ssw_config.shutdown_timeout * factor),
+        Duration::from_secs_f64(ssw_config.shutdown_timeout * 60.0),
     ));
 
     loop {
