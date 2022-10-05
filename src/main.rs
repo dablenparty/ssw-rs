@@ -13,6 +13,7 @@ mod util;
 use std::{
     io::{self, Write},
     path::PathBuf,
+    sync::{Arc, Mutex},
 };
 
 use crate::{
@@ -24,11 +25,12 @@ use clap::Parser;
 use flate2::{Compression, GzBuilder};
 use log::{debug, error, info, warn, LevelFilter};
 use manifest::load_versions;
+use minecraft::MCServerState;
 use simplelog::{
     format_description, ColorChoice, CombinedLogger, TermLogger, TerminalMode, ThreadLogMode,
     WriteLogger,
 };
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::{broadcast, mpsc::Receiver};
 use tokio::{io::AsyncBufReadExt, select, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use util::{create_dir_if_not_exists, get_exe_parent_dir};
@@ -42,6 +44,8 @@ pub enum SswEvent {
     StdinMessage(String),
     /// Sent when the proxy thread needs to know the Minecraft port
     McPortRequest,
+    /// Sent when another thread forces a shutdown of the server, with a reason.
+    ForceShutdown(String),
 }
 
 /// Simple Server Wrapper (SSW) is a simple wrapper for Minecraft servers, allowing for easy
@@ -90,7 +94,12 @@ async fn main() -> io::Result<()> {
     }
     let port = mc_server.ssw_config.ssw_port;
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<SswEvent>(100);
-    let (proxy_handle, proxy_cancel_token, proxy_tx) = start_proxy_task(port, event_tx.clone());
+    let (proxy_handle, proxy_cancel_token, proxy_tx) = start_proxy_task(
+        port,
+        mc_server.status(),
+        mc_server.subscribe_to_state_changes(),
+        event_tx.clone(),
+    );
     //? separate cancel token
     let stdin_handle = start_stdin_task(event_tx.clone(), proxy_cancel_token.clone());
     run_ssw_event_loop(&mut mc_server, proxy_cancel_token, &mut event_rx, proxy_tx).await;
@@ -210,6 +219,7 @@ async fn run_ssw_event_loop(
                     error!("Failed to send port to proxy: {:?}", e);
                 }
             }
+            SswEvent::ForceShutdown(reason) => todo!(),
         }
     }
 }
@@ -371,6 +381,8 @@ fn print_help() {
 /// returns: `(JoinHandle<()>, CancellationToken)`
 fn start_proxy_task(
     port: u16,
+    server_state: Arc<Mutex<MCServerState>>,
+    server_state_rx: broadcast::Receiver<MCServerState>,
     event_tx: Sender<SswEvent>,
 ) -> (JoinHandle<()>, CancellationToken, Sender<u16>) {
     let token = CancellationToken::new();
@@ -379,7 +391,7 @@ fn start_proxy_task(
     let handle = tokio::spawn(async move {
         let inner_clone = cloned_token.clone();
         select! {
-            r = run_proxy(port, inner_clone, event_tx, proxy_rx) => {
+            r = run_proxy(port, server_state, inner_clone, event_tx, proxy_rx, server_state_rx) => {
                 if let Err(e) = r {
                     if e.kind() == io::ErrorKind::AddrInUse {
                         error!("Failed to start proxy: port {} is already in use", port);

@@ -2,24 +2,35 @@ use std::{
     collections::{hash_map, HashMap},
     io,
     net::SocketAddr,
+    sync::{Arc, Mutex},
 };
 
 use log::{debug, error, info, warn};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{Receiver, Sender},
+    sync::{
+        broadcast,
+        mpsc::{Receiver, Sender},
+    },
     task::JoinHandle,
     time::Duration,
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::minecraft::DEFAULT_MC_PORT;
+use crate::minecraft::{MCServerState, DEFAULT_MC_PORT};
 use crate::SswEvent;
 
 enum ConnectionManagerEvent {
     Connected(SocketAddr, JoinHandle<()>),
+    SetReal(SocketAddr),
     Disconnected(SocketAddr),
+}
+
+struct ConnectedClient {
+    addr: SocketAddr,
+    handle: JoinHandle<()>,
+    is_real: bool,
 }
 
 /// Runs the proxy server
@@ -37,10 +48,13 @@ enum ConnectionManagerEvent {
 /// An error is returned if the TCP listener fails to bind to the port or accept a new connection.
 pub async fn run_proxy(
     ssw_port: u16,
+    server_state: Arc<Mutex<MCServerState>>,
     cancellation_token: CancellationToken,
-    tx: Sender<SswEvent>,
-    mut rx: Receiver<u16>,
+    ssw_event_tx: Sender<SswEvent>,
+    mut server_port_rx: Receiver<u16>,
+    server_state_rx: broadcast::Receiver<MCServerState>,
 ) -> io::Result<()> {
+    // TODO: extract proxy config struct because the parameter list is getting long
     const REAL_CONNECTION_SECS: u64 = 5;
     debug!("Starting proxy on port {}", ssw_port);
     // TODO: optional command line arg for IP
@@ -55,19 +69,21 @@ pub async fn run_proxy(
     let connection_manager_token = cancellation_token.clone();
     let _connection_manager_handle = tokio::spawn(connection_manager(
         connection_manager_rx,
+        server_state_rx,
         connection_manager_token,
+        server_state,
     ));
 
     loop {
         let (client, client_addr) = listener.accept().await?;
         debug!("Accepted connection from {}", client_addr);
 
-        let mc_port = if let Err(e) = tx.send(SswEvent::McPortRequest).await {
+        let mc_port = if let Err(e) = ssw_event_tx.send(SswEvent::McPortRequest).await {
             error!("Failed to request MC port: {}", e);
             error!("Using default port {}", DEFAULT_MC_PORT);
             DEFAULT_MC_PORT
         } else {
-            rx.recv().await.unwrap_or(DEFAULT_MC_PORT)
+            server_port_rx.recv().await.unwrap_or(DEFAULT_MC_PORT)
         };
         if mc_port == ssw_port {
             warn!(
@@ -81,10 +97,14 @@ pub async fn run_proxy(
         let connection_handle = tokio::spawn(async move {
             // this isn't necessarily needed, but it covers the bases
             let conn_timer_token = connection_token.clone();
+            let real_tx_clone = tx_clone.clone();
             let real_conn_timer = tokio::spawn(async move {
                 select! {
                     _ = tokio::time::sleep(Duration::from_secs(REAL_CONNECTION_SECS)) => {
                         debug!("Real connection accepted, cancelling shutdown timer");
+                        if let Err(e) = real_tx_clone.send(ConnectionManagerEvent::SetReal(client_addr)).await {
+                            error!("Failed to set {} to real connection: {}", client_addr, e);
+                        }
                     }
                     _ = conn_timer_token.cancelled() => {
                         debug!("Cancelled real connection timer");
@@ -138,18 +158,32 @@ pub async fn run_proxy(
 /// * `cancellation_token` - The cancellation token to use
 async fn connection_manager(
     mut connection_manager_rx: Receiver<ConnectionManagerEvent>,
+    mut server_state_channel: broadcast::Receiver<MCServerState>,
     connection_manager_token: CancellationToken,
+    server_state: Arc<Mutex<MCServerState>>,
 ) {
     // TODO: set initial capacity to server player limit
-    let mut connections = HashMap::<SocketAddr, JoinHandle<()>>::new();
+    let mut connections = HashMap::<SocketAddr, ConnectedClient>::new();
+    let mut shutdown_task = None;
     loop {
+        if connections.is_empty() && shutdown_task.is_none() {
+            let current_state = { *server_state.lock().unwrap() };
+            if current_state == MCServerState::Running {
+                info!("Server is empty, starting shutdown timer");
+                shutdown_task = Some(());
+            }
+        }
         select! {
             msg = connection_manager_rx.recv() => {
                 if let Some(event) = msg {
                     match event {
                         ConnectionManagerEvent::Connected(addr, handle) => {
                             if let hash_map::Entry::Vacant(entry) = connections.entry(addr) {
-                                entry.insert(handle);
+                                entry.insert(ConnectedClient {
+                                    addr,
+                                    handle,
+                                    is_real: false,
+                                });
                             } else {
                                 // this shouldn't happen
                                 warn!("Connection already exists for {}", addr);
@@ -158,16 +192,32 @@ async fn connection_manager(
                         ConnectionManagerEvent::Disconnected(addr) => {
                             connections.remove(&addr);
                         }
+                        ConnectionManagerEvent::SetReal(addr) => {
+                            if let hash_map::Entry::Occupied(mut entry) = connections.entry(addr) {
+                                entry.get_mut().is_real = true;
+                                info!("Player joined, cancelling shutdown timer");
+                                shutdown_task = None;
+                            } else {
+                                // this shouldn't happen
+                                warn!("Connection doesn't exist for {}", addr);
+                            }
+                        }
                     }
                     debug!("There are now {} connections", connections.len());
                 } else {
                     error!("Connection manager channel closed");
                 }
             },
-
+            state = server_state_channel.recv() => {
+                // TODO: this is a bit of a hack, but it works for now
+                // forces a re-check of connections if server state changes
+                if let Err(e) = state {
+                    error!("Error waiting for server state: {}", e);
+                }
+            },
             _ = connection_manager_token.cancelled() => {
                 info!("Waiting for all proxy connections to close");
-                futures::future::join_all(connections.drain().map(|(_, handle)| handle)).await;
+                futures::future::join_all(connections.drain().map(|(_, client)| client.handle)).await;
                 info!("All proxy connections closed");
                 break;
             }
