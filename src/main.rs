@@ -189,8 +189,6 @@ async fn run_ssw_event_loop(
                     "mc-version" => {
                         if let Err(e) = get_or_set_mc_version(&command_with_args, mc_server).await {
                             error!("Failed to get or set Minecraft version: {}", e);
-                        } else {
-                            info!("Successfully set Minecraft version.");
                         }
                     }
                     "ssw-port" => {
@@ -453,6 +451,7 @@ async fn get_or_set_mc_version(
             .ssw_config
             .save(&mc_server.get_config_path())
             .await?;
+        info!("Successfully set Minecraft version.");
     }
     Ok(())
 }
