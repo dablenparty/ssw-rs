@@ -79,11 +79,14 @@ pub async fn run_proxy(
         tokio::sync::mpsc::channel::<ConnectionManagerEvent>(100);
     // TODO: when error handling is improved, shut this down properly
     let connection_manager_token = cancellation_token.clone();
+    let factor = if cfg!(debug_assertions) { 2.0 } else { 60.0 };
     let _connection_manager_handle = tokio::spawn(connection_manager(
         connection_manager_rx,
         server_state_rx,
+        ssw_event_tx.clone(),
         connection_manager_token,
         server_state,
+        Duration::from_secs_f64(ssw_config.shutdown_timeout * factor),
     ));
 
     loop {
@@ -113,7 +116,7 @@ pub async fn run_proxy(
             let real_conn_timer = tokio::spawn(async move {
                 select! {
                     _ = tokio::time::sleep(Duration::from_secs(REAL_CONNECTION_SECS)) => {
-                        debug!("Real connection accepted, cancelling shutdown timer");
+                        debug!("Real connection accepted");
                         if let Err(e) = real_tx_clone.send(ConnectionManagerEvent::SetReal(client_addr)).await {
                             error!("Failed to set {} to real connection: {}", client_addr, e);
                         }
@@ -171,18 +174,36 @@ pub async fn run_proxy(
 async fn connection_manager(
     mut connection_manager_rx: mpsc::Receiver<ConnectionManagerEvent>,
     mut server_state_channel: broadcast::Receiver<MCServerState>,
+    ssw_event_sender: mpsc::Sender<SswEvent>,
     connection_manager_token: CancellationToken,
     server_state: Arc<Mutex<MCServerState>>,
+    shutdown_task_duration: Duration,
 ) {
     // TODO: set initial capacity to server player limit
     let mut connections = HashMap::<SocketAddr, ConnectedClient>::new();
-    let mut shutdown_task = None;
+    let mut shutdown_task: Option<JoinHandle<()>> = None;
     loop {
-        if connections.is_empty() && shutdown_task.is_none() {
+        // unwrap is OK because it will only be checked if `is_none()` returns false (meaning it is Some)
+        if connections.is_empty()
+            && (shutdown_task.is_none() || shutdown_task.as_ref().unwrap().is_finished())
+        {
             let current_state = { *server_state.lock().unwrap() };
             if current_state == MCServerState::Running {
-                info!("Server is empty, starting shutdown timer");
-                shutdown_task = Some(());
+                info!(
+                    "Server is empty, setting shutdown timer for {:.2} minutes",
+                    shutdown_task_duration.as_secs_f64() / 60.0
+                );
+                let ssw_event_sender_clone = ssw_event_sender.clone();
+                shutdown_task = Some(tokio::spawn(async move {
+                    tokio::time::sleep(shutdown_task_duration).await;
+                    info!("Server is empty, shutting down");
+                    if let Err(e) = ssw_event_sender_clone
+                        .send(SswEvent::ForceShutdown("No players online".to_owned()))
+                        .await
+                    {
+                        error!("Failed to send shutdown event: {}", e);
+                    }
+                }));
             }
         }
         select! {
@@ -207,7 +228,11 @@ async fn connection_manager(
                         ConnectionManagerEvent::SetReal(addr) => {
                             if let hash_map::Entry::Occupied(mut entry) = connections.entry(addr) {
                                 entry.get_mut().is_real = true;
-                                info!("Player joined, cancelling shutdown timer");
+                                if let Some(shutdown_task) = shutdown_task.take() {
+                                    // abort is OK here because sleep is cancelled by just dropping the future
+                                    info!("Player joined, cancelling shutdown timer");
+                                    shutdown_task.abort();
+                                }
                                 shutdown_task = None;
                             } else {
                                 // this shouldn't happen
@@ -228,6 +253,10 @@ async fn connection_manager(
                 }
             },
             _ = connection_manager_token.cancelled() => {
+                if let Some(shutdown_task) = shutdown_task {
+                    debug!("Cancelling shutdown task");
+                    shutdown_task.abort();
+                }
                 info!("Waiting for all proxy connections to close");
                 futures::future::join_all(connections.drain().map(|(_, client)| client.handle)).await;
                 info!("All proxy connections closed");
