@@ -90,67 +90,68 @@ pub async fn run_proxy(
     loop {
         let (client, client_addr) = listener.accept().await?;
         debug!("Accepted connection from {}", client_addr);
-
-        let mc_port = if let Err(e) = ssw_event_tx.send(SswEvent::McPortRequest).await {
-            error!("Failed to request MC port: {}", e);
-            error!("Using default port {}", DEFAULT_MC_PORT);
-            DEFAULT_MC_PORT
-        } else {
-            server_port_rx.recv().await.unwrap_or(DEFAULT_MC_PORT)
-        };
-        if mc_port == ssw_config.ssw_port {
-            warn!(
-                "MC port is the same as SSW port, ignoring connection from {}",
-                client_addr
-            );
-            continue;
-        }
-        let tx_clone = connection_manager_tx.clone();
-        let connection_token = cancellation_token.clone();
-        let event_tx_clone = ssw_event_tx.clone();
-        let connection_handle = tokio::spawn(async move {
-            // this isn't necessarily needed, but it covers the bases
-            let conn_timer_token = connection_token.clone();
-            let real_tx_clone = tx_clone.clone();
-            let real_conn_timer = tokio::spawn(async move {
-                select! {
-                    _ = tokio::time::sleep(Duration::from_secs(REAL_CONNECTION_SECS)) => {
-                        debug!("Real connection accepted");
-                        if let Err(e) = real_tx_clone.send(ConnectionManagerEvent::SetReal(client_addr)).await {
-                            error!("Failed to set {} to real connection: {}", client_addr, e);
-                        }
-                    }
-                    _ = conn_timer_token.cancelled() => {
-                        debug!("Cancelled real connection timer");
-                    }
-                }
-            });
-            select! {
-                r = connection_handler(client, mc_port) => {
-                    if let Err(e) = r {
-                        warn!("Error handling connection: {}", e);
-                        if e.kind() == io::ErrorKind::ConnectionRefused {
-                            info!("Connection accepted when Minecraft server is not running, starting it");
-                            if let Err(e) = event_tx_clone.send(SswEvent::ForceStartup("Connection accepted".to_string())).await {
-                                error!("Failed to force startup: {}", e);
+        let connection_handle = {
+            let mc_port = if let Err(e) = ssw_event_tx.send(SswEvent::McPortRequest).await {
+                error!("Failed to request MC port: {}", e);
+                error!("Using default port {}", DEFAULT_MC_PORT);
+                DEFAULT_MC_PORT
+            } else {
+                server_port_rx.recv().await.unwrap_or(DEFAULT_MC_PORT)
+            };
+            if mc_port == ssw_config.ssw_port {
+                warn!(
+                    "MC port is the same as SSW port, ignoring connection from {}",
+                    client_addr
+                );
+                continue;
+            }
+            let tx_clone = connection_manager_tx.clone();
+            let connection_token = cancellation_token.clone();
+            let event_tx_clone = ssw_event_tx.clone();
+            tokio::spawn(async move {
+                // this isn't necessarily needed, but it covers the bases
+                let conn_timer_token = connection_token.clone();
+                let real_tx_clone = tx_clone.clone();
+                let real_conn_timer = tokio::spawn(async move {
+                    select! {
+                        _ = tokio::time::sleep(Duration::from_secs(REAL_CONNECTION_SECS)) => {
+                            debug!("Real connection accepted");
+                            if let Err(e) = real_tx_clone.send(ConnectionManagerEvent::SetReal(client_addr)).await {
+                                error!("Failed to set {} to real connection: {}", client_addr, e);
                             }
                         }
-                    } else {
-                        debug!("Connection lost from {}", client_addr);
+                        _ = conn_timer_token.cancelled() => {
+                            debug!("Cancelled real connection timer");
+                        }
                     }
-                },
-                _ = connection_token.cancelled() => {
-                    debug!("Connection cancelled from {}", client_addr);
+                });
+                select! {
+                    r = connection_handler(client, mc_port) => {
+                        if let Err(e) = r {
+                            warn!("Error handling connection: {}", e);
+                            if e.kind() == io::ErrorKind::ConnectionRefused {
+                                info!("Connection accepted when Minecraft server is not running, starting it");
+                                if let Err(e) = event_tx_clone.send(SswEvent::ForceStartup("Connection accepted".to_string())).await {
+                                    error!("Failed to force startup: {}", e);
+                                }
+                            }
+                        } else {
+                            debug!("Connection lost from {}", client_addr);
+                        }
+                    },
+                    _ = connection_token.cancelled() => {
+                        debug!("Connection cancelled from {}", client_addr);
+                    }
                 }
-            }
-            real_conn_timer.abort();
-            if let Err(e) = tx_clone
-                .send(ConnectionManagerEvent::Disconnected(client_addr))
-                .await
-            {
-                error!("Error sending connection manager event: {}", e);
-            }
-        });
+                real_conn_timer.abort();
+                if let Err(e) = tx_clone
+                    .send(ConnectionManagerEvent::Disconnected(client_addr))
+                    .await
+                {
+                    error!("Error sending connection manager event: {}", e);
+                }
+            })
+        };
         if let Err(e) = connection_manager_tx
             .send(ConnectionManagerEvent::Connected(
                 client_addr,
