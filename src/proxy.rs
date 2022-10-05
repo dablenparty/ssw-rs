@@ -53,9 +53,10 @@ pub async fn run_proxy(
         tokio::sync::mpsc::channel::<ConnectionManagerEvent>(100);
     // TODO: when error handling is improved, shut this down properly
     let connection_manager_token = cancellation_token.clone();
-    let _connection_manager_handle = tokio::spawn(async move {
-        connection_manager(connection_manager_rx, connection_manager_token).await;
-    });
+    let _connection_manager_handle = tokio::spawn(connection_manager(
+        connection_manager_rx,
+        connection_manager_token,
+    ));
 
     loop {
         let (client, client_addr) = listener.accept().await?;
