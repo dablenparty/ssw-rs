@@ -46,7 +46,7 @@ impl Default for MCServerState {
 
 // TODO: auto-restart after crash
 /// The SSW server configuration
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SswConfig {
     /// How much memory to allocate to the server in gigabytes
     pub memory_in_gb: f32,
