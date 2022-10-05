@@ -198,6 +198,25 @@ impl MinecraftServer {
         self.send_command("stop".to_string()).await
     }
 
+    /// Restarts the server
+    /// This works by calling `stop`, `wait_for_exit`, then `start`
+    ///
+    /// # Errors
+    ///
+    /// An error may occur if sending the stop command to the server fails,
+    /// if waiting for the server to exit fails, or if starting the server fails
+    pub async fn restart(&mut self) -> ssw_error::Result<()> {
+        self.stop().await.map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to send stop command: {}", e),
+            )
+        })?;
+        self.wait_for_exit().await?;
+        self.run().await?;
+        Ok(())
+    }
+
     /// Send a command to the server if it is running
     ///
     /// # Arguments
