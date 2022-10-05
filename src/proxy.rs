@@ -25,7 +25,6 @@ enum ConnectionManagerEvent {
 }
 
 struct ConnectedClient {
-    addr: SocketAddr,
     handle: JoinHandle<()>,
     is_real: bool,
 }
@@ -50,7 +49,7 @@ pub struct ProxyConfig {
 ///
 /// # Arguments
 ///
-/// * `config` - The ProxyConfig struct containing all the necessary information to run the proxy
+/// * `config` - The `ProxyConfig` struct containing all the necessary information to run the proxy
 /// * `cancellation_token` - The cancellation token to use
 ///
 /// # Errors
@@ -60,6 +59,7 @@ pub async fn run_proxy(
     config: ProxyConfig,
     cancellation_token: CancellationToken,
 ) -> io::Result<()> {
+    const REAL_CONNECTION_SECS: u64 = 5;
     let ProxyConfig {
         ssw_config,
         server_state,
@@ -67,7 +67,6 @@ pub async fn run_proxy(
         mut server_port_rx,
         server_state_rx,
     } = config;
-    const REAL_CONNECTION_SECS: u64 = 5;
     debug!("Starting proxy on port {}", ssw_config.ssw_port);
     // TODO: optional command line arg for IP
     let addr = format!("{}:{}", "0.0.0.0", ssw_config.ssw_port);
@@ -213,7 +212,6 @@ async fn connection_manager(
                         ConnectionManagerEvent::Connected(addr, handle) => {
                             if let hash_map::Entry::Vacant(entry) = connections.entry(addr) {
                                 entry.insert(ConnectedClient {
-                                    addr,
                                     handle,
                                     is_real: false,
                                 });

@@ -49,12 +49,12 @@ impl Default for MCServerState {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SswConfig {
     /// How much memory to allocate to the server in gigabytes
-    pub memory_in_gb: f64 ,
+    pub memory_in_gb: f64,
     /// How long to wait (in hours) before restarting the server
-    pub restart_timeout: f64 ,
+    pub restart_timeout: f64,
     /// How long to wait (in minutes) with no players before shutting
     /// down the server
-    pub shutdown_timeout: f64 ,
+    pub shutdown_timeout: f64,
     /// The port to use for the SSW proxy
     pub ssw_port: u16,
     /// The version string for the associated Minecraft server
@@ -350,7 +350,7 @@ impl MinecraftServer {
     /// An error can occur when:
     /// - A Java executable cannot be found
     /// - The server jar cannot be found, read, or its path has an invalid format
-    /// - Patching Log4J fails
+    /// - Patching `Log4J` fails
     /// - The server process cannot be spawned
     pub async fn run(&mut self) -> ssw_error::Result<()> {
         let java_executable = self.get_java_executable().await?;
@@ -424,24 +424,10 @@ impl MinecraftServer {
         });
         let mut pipe_handles = vec![(stdout_token, stdout_handle)];
 
-        let mut stderr = child.stderr.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
         let stderr_token = CancellationToken::new();
         let cloned_token = stderr_token.clone();
-        let stderr_handle = tokio::spawn(async move {
-            let mut stdout = tokio::io::stdout();
-            select! {
-                n = tokio::io::copy(&mut stderr, &mut stdout) => {
-                    if let Err(err) = n {
-                        error!("Error reading from stderr: {}", err);
-                    } else {
-                        debug!("Finished reading from stderr");
-                    }
-                }
-                _ = cloned_token.cancelled() => {
-                    debug!("stderr pipe cancelled");
-                }
-            }
-        });
+        let stderr_handle = tokio::spawn(pipe_stderr(stderr, cloned_token));
         pipe_handles.push((stderr_token, stderr_handle));
 
         // pipe stdin to child stdin
@@ -563,6 +549,22 @@ impl MinecraftServer {
     /// Gets a reference to the servers JAR path.
     pub fn jar_path(&self) -> &Path {
         self.jar_path.as_path()
+    }
+}
+
+async fn pipe_stderr(mut stderr: tokio::process::ChildStderr, cloned_token: CancellationToken) {
+    let mut stdout = tokio::io::stdout();
+    select! {
+        n = tokio::io::copy(&mut stderr, &mut stdout) => {
+            if let Err(err) = n {
+                error!("Error reading from stderr: {}", err);
+            } else {
+                debug!("Finished reading from stderr");
+            }
+        }
+        _ = cloned_token.cancelled() => {
+            debug!("stderr pipe cancelled");
+        }
     }
 }
 

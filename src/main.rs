@@ -160,12 +160,7 @@ async fn run_ssw_event_loop(
                             || current_server_status == minecraft::MCServerState::Starting
                         {
                             info!("Server is currently running, stopping it first");
-                            if let Err(e) = mc_server.stop().await {
-                                error!("Failed to send stop command to server: {:?}", e);
-                            }
-                            if let Err(e) = mc_server.wait_for_exit().await {
-                                error!("Failed to wait for server to exit: {}", e);
-                            }
+                            gracefully_stop_server(mc_server).await;
                         }
                         proxy_cancel_token.cancel();
                         break;
@@ -205,30 +200,38 @@ async fn run_ssw_event_loop(
             }
             SswEvent::McPortRequest => {
                 // this really shouldn't be a problem, but just in case
-                let port: u16 = mc_server
-                    .get_property("server-port")
-                    .map_or(DEFAULT_MC_PORT.into(), |v| {
-                        v.as_u64().unwrap_or_else(|| DEFAULT_MC_PORT.into())
-                    })
-                    .try_into()
-                    .unwrap_or_else(|_| {
-                        error!("The server port is not a valid TCP port. Valid ports are in the range 0-65535");
-                        DEFAULT_MC_PORT
-                    });
-                if let Err(e) = proxy_tx.send(port).await {
-                    error!("Failed to send port to proxy: {:?}", e);
-                }
+                send_port_to_proxy(mc_server, &proxy_tx).await;
             }
             SswEvent::ForceShutdown(reason) => {
                 info!("Force shutdown requested: {}", reason);
-                if let Err(e) = mc_server.stop().await {
-                    error!("Failed to send stop command to server: {:?}", e);
-                }
-                if let Err(e) = mc_server.wait_for_exit().await {
-                    error!("Failed to wait for server to exit: {}", e);
-                }
+                gracefully_stop_server(mc_server).await;
             }
         }
+    }
+}
+
+async fn gracefully_stop_server(mc_server: &mut MinecraftServer) {
+    if let Err(e) = mc_server.stop().await {
+        error!("Failed to send stop command to server: {:?}", e);
+    }
+    if let Err(e) = mc_server.wait_for_exit().await {
+        error!("Failed to wait for server to exit: {}", e);
+    }
+}
+
+async fn send_port_to_proxy(mc_server: &mut MinecraftServer, proxy_tx: &Sender<u16>) {
+    let port: u16 = mc_server
+        .get_property("server-port")
+        .map_or(DEFAULT_MC_PORT.into(), |v| {
+            v.as_u64().unwrap_or_else(|| DEFAULT_MC_PORT.into())
+        })
+        .try_into()
+        .unwrap_or_else(|_| {
+            error!("The server port is not a valid TCP port. Valid ports are in the range 0-65535");
+            DEFAULT_MC_PORT
+        });
+    if let Err(e) = proxy_tx.send(port).await {
+        error!("Failed to send port to proxy: {:?}", e);
     }
 }
 
