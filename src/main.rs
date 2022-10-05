@@ -159,12 +159,7 @@ async fn run_ssw_event_loop(
             break;
         }
         let event = event.unwrap();
-        let current_server_status = {
-            *mc_server
-                .status()
-                .lock()
-                .expect("Failed to lock on server status")
-        };
+        let current_server_status = { *mc_server.status().lock().unwrap() };
         match event {
             SswEvent::StdinMessage(msg) => {
                 let command_with_args: Vec<&str> = msg.split_whitespace().collect();
@@ -232,18 +227,12 @@ async fn run_ssw_event_loop(
             }
             SswEvent::ForceStartup(reason) => {
                 info!("Force startup requested: {}", reason);
-                if current_server_status == MCServerState::Stopped {
-                    if let Err(e) = mc_server.run().await {
-                        error!("Failed to start server: {}", e);
-                    }
-                } else {
-                    warn!("Server is already running, ignoring startup request");
-                }
-            },
+                handle_start_command(current_server_status, mc_server).await;
+            }
         }
     }
     if let Err(e) = restart_handle.await {
-        error!("Failed to join restart task: {}", e);
+        error!("Failed to wait on restart task: {}", e);
     }
 }
 
