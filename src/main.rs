@@ -125,7 +125,8 @@ async fn main() -> io::Result<()> {
 ///
 /// * `mc_server`: the Minecraft server instance
 /// * `proxy_cancel_token`: the cancel token for the proxy task
-/// * `event_rx`: the event channel receiver
+/// * `event_channels`: the event channels
+/// * `proxy_tx`: the proxy task's port channel
 ///
 /// returns: `()`
 async fn run_ssw_event_loop(
@@ -234,6 +235,12 @@ async fn run_ssw_event_loop(
     }
 }
 
+/// Handles the start command. If the server is already running, nothing happens.
+///
+/// # Arguments
+///
+/// * `current_server_status`: the current server status
+/// * `mc_server`: the Minecraft server instance
 async fn handle_start_command(
     current_server_status: MCServerState,
     mc_server: &mut MinecraftServer,
@@ -250,11 +257,19 @@ async fn handle_start_command(
     }
 }
 
+/// Wrapper function to monitor the server state and handle the restart timeout accordingly.
+///
+/// # Arguments
+///
+/// * `restart_timeout`: the timeout after which the server should be restarted
+/// * `event_tx`: the event channel sender
+/// * `state_rx`: the state channel receiver
+/// * `cancel_token`: the cancel token for the task
 async fn handle_restart_task(
     restart_timeout: Duration,
     event_tx: Sender<SswEvent>,
     mut state_rx: broadcast::Receiver<MCServerState>,
-    restart_cancel_token: CancellationToken,
+    cancel_token: CancellationToken,
 ) {
     let mut task_handle: Option<JoinHandle<()>> = None;
     loop {
@@ -283,7 +298,7 @@ async fn handle_restart_task(
                     },
                 };
             }
-            _ = restart_cancel_token.cancelled() => {
+            _ = cancel_token.cancelled() => {
                 debug!("Restart task cancelled.");
                 if let Some(handle) = task_handle {
                     handle.abort();
@@ -294,6 +309,16 @@ async fn handle_restart_task(
     }
 }
 
+/// Waits for a specified duration before sending a restart event to the event channel.
+/// This will notify the server every hour, then every 15 minutes, then 5 minutes, then
+/// 1 minute, finally ending with a 15 second countdown.
+///
+/// This function is intended to be run as a task.
+///
+/// # Arguments
+///
+/// * `wait_for` - The duration to wait before sending the restart event.
+/// * `event_tx` - The event channel to send events to.
 async fn restart_task(wait_for: Duration, event_tx: Sender<SswEvent>) {
     const MESSAGE_PREFIX: &str = "/me is restarting in";
     const DURATION_SPLITS: [usize; 6] = [3600, 900, 300, 60, 15, 1];
@@ -324,6 +349,11 @@ async fn restart_task(wait_for: Duration, event_tx: Sender<SswEvent>) {
     }
 }
 
+/// Helper function to log errors when attempting to stop the server.
+///
+/// # Arguments
+///
+/// * `mc_server` - The Minecraft server to stop.
 async fn gracefully_stop_server(mc_server: &mut MinecraftServer) {
     if let Err(e) = mc_server.stop().await {
         error!("Failed to send stop command to server: {:?}", e);
@@ -333,6 +363,12 @@ async fn gracefully_stop_server(mc_server: &mut MinecraftServer) {
     }
 }
 
+/// Sends the Minecraft server's port to the proxy.
+///
+/// # Arguments
+///
+/// * `mc_server` - The Minecraft server to get the port from.
+/// * `proxy_tx` - The proxy's event sender.
 async fn send_port_to_proxy(mc_server: &mut MinecraftServer, proxy_tx: &Sender<u16>) {
     let port: u16 = mc_server
         .get_property("server-port")
@@ -500,10 +536,12 @@ fn print_help() {
 ///
 /// # Arguments
 ///
-/// * `port` - The port to listen on
-/// * `event_tx` - The event channel sender
+/// * `ssw_config`: the SSW configuration
+/// * `server_state`: a thread-safe reference to the server state
+/// * `server_state_rx`: the server state receiver
+/// * `event_tx`: an event sender for the main thread
 ///
-/// returns: `(JoinHandle<()>, CancellationToken)`
+/// returns: `(JoinHandle<()>, CancellationToken, Sender<u16>)`
 fn start_proxy_task(
     ssw_config: SswConfig,
     server_state: Arc<Mutex<MCServerState>>,
