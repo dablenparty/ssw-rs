@@ -2,6 +2,7 @@ use std::{error, fmt, io, num};
 
 /// An error wrapper type used across the entire crate, usually where multiple error types are
 /// returned.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 pub enum Error {
     /// Raised when the second argument, the actual version string, is lower than the first argument,
