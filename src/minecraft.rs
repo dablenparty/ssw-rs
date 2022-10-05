@@ -49,12 +49,12 @@ impl Default for MCServerState {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SswConfig {
     /// How much memory to allocate to the server in gigabytes
-    pub memory_in_gb: f32,
+    pub memory_in_gb: f64 ,
     /// How long to wait (in hours) before restarting the server
-    pub restart_timeout: f32,
+    pub restart_timeout: f64 ,
     /// How long to wait (in minutes) with no players before shutting
     /// down the server
-    pub shutdown_timeout: f32,
+    pub shutdown_timeout: f64 ,
     /// The port to use for the SSW proxy
     pub ssw_port: u16,
     /// The version string for the associated Minecraft server
