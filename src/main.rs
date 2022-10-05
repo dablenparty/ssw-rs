@@ -135,47 +135,19 @@ async fn run_ssw_event_loop(
     proxy_tx: Sender<u16>,
 ) {
     let (event_tx, mut event_rx) = event_channels;
-    let mut state_rx = mc_server.subscribe_to_state_changes();
-    let restart_cancel_token = proxy_cancel_token.clone();
-    // restart timeout is stored in hours
-    let restart_timeout = Duration::from_secs_f64(mc_server.ssw_config.restart_timeout * 3600.0);
     let restart_handle = {
+        let state_rx = mc_server.subscribe_to_state_changes();
+        let restart_cancel_token = proxy_cancel_token.clone();
+        // restart timeout is stored in hours
+        let restart_timeout =
+            Duration::from_secs_f64(mc_server.ssw_config.restart_timeout * 3600.0);
         let event_tx = event_tx.clone();
-        tokio::spawn(async move {
-            let mut task_handle: Option<JoinHandle<()>> = None;
-            loop {
-                select! {
-                    state = state_rx.recv() => {
-                        if let Err(e) = state {
-                            error!("failed to receive state change: {:?}", e);
-                            continue;
-                        }
-                        match state.unwrap() {
-                            MCServerState::Starting => {},
-                            MCServerState::Running => {
-                                if let Some(handle) = task_handle.take() {
-                                    warn!("Server restarted before scheduled restart task could run.");
-                                    handle.abort();
-                                }
-                                if !restart_timeout.is_zero() {
-                                    task_handle = Some(tokio::spawn(restart_task(restart_timeout, event_tx.clone())))
-                                }
-                            },
-                            MCServerState::Stopping | MCServerState::Stopped => {
-                                if let Some(handle) = task_handle {
-                                    handle.abort();
-                                }
-                                task_handle = None;
-                            },
-                        };
-                    }
-                    _ = restart_cancel_token.cancelled() => {
-                        debug!("Restart task cancelled.");
-                        break;
-                    }
-                }
-            }
-        })
+        tokio::spawn(handle_restart_task(
+            restart_timeout,
+            event_tx,
+            state_rx,
+            restart_cancel_token,
+        ))
     };
     loop {
         let event = event_rx.recv().await;
@@ -196,16 +168,7 @@ async fn run_ssw_event_loop(
                 let command = command_with_args[0];
                 match command {
                     "start" => {
-                        if current_server_status == minecraft::MCServerState::Stopped {
-                            if let Err(e) = mc_server.run().await {
-                                error!("Failed to start server: {}", e);
-                                if let ssw_error::Error::MissingMinecraftVersion = e {
-                                    error!("Use the 'mc-version' command to set the Minecraft version of the server.");
-                                }
-                            }
-                        } else {
-                            warn!("Server is already running");
-                        }
+                        handle_start_command(current_server_status, mc_server).await;
                     }
                     EXIT_COMMAND => {
                         if current_server_status == minecraft::MCServerState::Running
@@ -271,11 +234,71 @@ async fn run_ssw_event_loop(
     }
 }
 
+async fn handle_start_command(
+    current_server_status: MCServerState,
+    mc_server: &mut MinecraftServer,
+) {
+    if current_server_status == minecraft::MCServerState::Stopped {
+        if let Err(e) = mc_server.run().await {
+            error!("Failed to start server: {}", e);
+            if let ssw_error::Error::MissingMinecraftVersion = e {
+                error!("Use the 'mc-version' command to set the Minecraft version of the server.");
+            }
+        }
+    } else {
+        warn!("Server is already running");
+    }
+}
+
+async fn handle_restart_task(
+    restart_timeout: Duration,
+    event_tx: Sender<SswEvent>,
+    mut state_rx: broadcast::Receiver<MCServerState>,
+    restart_cancel_token: CancellationToken,
+) {
+    let mut task_handle: Option<JoinHandle<()>> = None;
+    loop {
+        select! {
+            state = state_rx.recv() => {
+                if let Err(e) = state {
+                    error!("failed to receive state change: {:?}", e);
+                    continue;
+                }
+                match state.unwrap() {
+                    MCServerState::Starting => {},
+                    MCServerState::Running => {
+                        if let Some(handle) = task_handle.take() {
+                            warn!("Server restarted before scheduled restart task could run.");
+                            handle.abort();
+                        }
+                        if !restart_timeout.is_zero() {
+                            task_handle = Some(tokio::spawn(restart_task(restart_timeout, event_tx.clone())));
+                        }
+                    },
+                    MCServerState::Stopping | MCServerState::Stopped => {
+                        if let Some(handle) = task_handle {
+                            handle.abort();
+                        }
+                        task_handle = None;
+                    },
+                };
+            }
+            _ = restart_cancel_token.cancelled() => {
+                debug!("Restart task cancelled.");
+                if let Some(handle) = task_handle {
+                    handle.abort();
+                }
+                break;
+            }
+        }
+    }
+}
+
 async fn restart_task(wait_for: Duration, event_tx: Sender<SswEvent>) {
     const MESSAGE_PREFIX: &str = "/me is restarting in";
     const DURATION_SPLITS: [usize; 6] = [3600, 900, 300, 60, 15, 1];
     let mut time_left = wait_for;
-    for split in DURATION_SPLITS.iter() {
+    for split in &DURATION_SPLITS {
         let split_duration = Duration::from_secs(*split as u64);
         let mut ticker = tokio::time::interval(split_duration);
         ticker.tick().await; // immediately tick to start
