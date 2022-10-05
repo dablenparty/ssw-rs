@@ -107,6 +107,7 @@ pub async fn run_proxy(
         }
         let tx_clone = connection_manager_tx.clone();
         let connection_token = cancellation_token.clone();
+        let event_tx_clone = ssw_event_tx.clone();
         let connection_handle = tokio::spawn(async move {
             // this isn't necessarily needed, but it covers the bases
             let conn_timer_token = connection_token.clone();
@@ -128,6 +129,12 @@ pub async fn run_proxy(
                 r = connection_handler(client, mc_port) => {
                     if let Err(e) = r {
                         warn!("Error handling connection: {}", e);
+                        if e.kind() == io::ErrorKind::ConnectionRefused {
+                            info!("Connection accepted when Minecraft server is not running, starting it");
+                            if let Err(e) = event_tx_clone.send(SswEvent::ForceStartup("Connection accepted".to_string())).await {
+                                error!("Failed to force startup: {}", e);
+                            }
+                        }
                     } else {
                         debug!("Connection lost from {}", client_addr);
                     }

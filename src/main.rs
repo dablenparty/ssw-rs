@@ -50,6 +50,8 @@ pub enum SswEvent {
     ForceShutdown(String),
     /// Sent when another thread forces a restart of the server, with a reason.
     ForceRestart(String),
+    /// Sent when another thread forces a startup of the server, with a reason.
+    ForceStartup(String),
 }
 
 /// Simple Server Wrapper (SSW) is a simple wrapper for Minecraft servers, allowing for easy
@@ -228,6 +230,16 @@ async fn run_ssw_event_loop(
                     error!("Failed to restart server: {}", e);
                 }
             }
+            SswEvent::ForceStartup(reason) => {
+                info!("Force startup requested: {}", reason);
+                if current_server_status == MCServerState::Stopped {
+                    if let Err(e) = mc_server.run().await {
+                        error!("Failed to start server: {}", e);
+                    }
+                } else {
+                    warn!("Server is already running, ignoring startup request");
+                }
+            },
         }
     }
     if let Err(e) = restart_handle.await {
