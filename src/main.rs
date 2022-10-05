@@ -13,6 +13,7 @@ use std::{
     io::{self, Write},
     path::PathBuf,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use crate::{
@@ -21,6 +22,7 @@ use crate::{
 };
 use chrono::{DateTime, Local};
 use clap::Parser;
+use duration_string::DurationString;
 use flate2::{Compression, GzBuilder};
 use log::{debug, error, info, warn, LevelFilter};
 use manifest::load_versions;
@@ -46,6 +48,8 @@ pub enum SswEvent {
     McPortRequest,
     /// Sent when another thread forces a shutdown of the server, with a reason.
     ForceShutdown(String),
+    /// Sent when another thread forces a restart of the server, with a reason.
+    ForceRestart(String),
 }
 
 /// Simple Server Wrapper (SSW) is a simple wrapper for Minecraft servers, allowing for easy
@@ -92,7 +96,7 @@ async fn main() -> io::Result<()> {
             error!("failed to load version: {}", e);
         }
     }
-    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<SswEvent>(100);
+    let (event_tx, event_rx) = tokio::sync::mpsc::channel::<SswEvent>(100);
     let (proxy_handle, proxy_cancel_token, proxy_tx) = start_proxy_task(
         mc_server.ssw_config.clone(),
         mc_server.status(),
@@ -101,7 +105,13 @@ async fn main() -> io::Result<()> {
     );
     //? separate cancel token
     let stdin_handle = start_stdin_task(event_tx.clone(), proxy_cancel_token.clone());
-    run_ssw_event_loop(&mut mc_server, proxy_cancel_token, &mut event_rx, proxy_tx).await;
+    run_ssw_event_loop(
+        &mut mc_server,
+        proxy_cancel_token,
+        (event_tx, event_rx),
+        proxy_tx,
+    )
+    .await;
     stdin_handle.await?;
     proxy_handle.await?;
     Ok(())
@@ -121,9 +131,52 @@ async fn main() -> io::Result<()> {
 async fn run_ssw_event_loop(
     mc_server: &mut MinecraftServer,
     proxy_cancel_token: CancellationToken,
-    event_rx: &mut Receiver<SswEvent>,
+    event_channels: (Sender<SswEvent>, Receiver<SswEvent>),
     proxy_tx: Sender<u16>,
 ) {
+    let (event_tx, mut event_rx) = event_channels;
+    let mut state_rx = mc_server.subscribe_to_state_changes();
+    let restart_cancel_token = proxy_cancel_token.clone();
+    // restart timeout is stored in hours
+    let restart_timeout = Duration::from_secs_f64(mc_server.ssw_config.restart_timeout * 3600.0);
+    let restart_handle = {
+        let event_tx = event_tx.clone();
+        tokio::spawn(async move {
+            let mut task_handle: Option<JoinHandle<()>> = None;
+            loop {
+                select! {
+                    state = state_rx.recv() => {
+                        if let Err(e) = state {
+                            error!("failed to receive state change: {:?}", e);
+                            continue;
+                        }
+                        match state.unwrap() {
+                            MCServerState::Starting => {},
+                            MCServerState::Running => {
+                                if let Some(handle) = task_handle.take() {
+                                    warn!("Server restarted before scheduled restart task could run.");
+                                    handle.abort();
+                                }
+                                if !restart_timeout.is_zero() {
+                                    task_handle = Some(tokio::spawn(restart_task(restart_timeout, event_tx.clone())))
+                                }
+                            },
+                            MCServerState::Stopping | MCServerState::Stopped => {
+                                if let Some(handle) = task_handle {
+                                    handle.abort();
+                                }
+                                task_handle = None;
+                            },
+                        };
+                    }
+                    _ = restart_cancel_token.cancelled() => {
+                        debug!("Restart task cancelled.");
+                        break;
+                    }
+                }
+            }
+        })
+    };
     loop {
         let event = event_rx.recv().await;
         if event.is_none() {
@@ -205,7 +258,46 @@ async fn run_ssw_event_loop(
                 info!("Force shutdown requested: {}", reason);
                 gracefully_stop_server(mc_server).await;
             }
+            SswEvent::ForceRestart(reason) => {
+                info!("Force restart requested: {}", reason);
+                if let Err(e) = mc_server.restart().await {
+                    error!("Failed to restart server: {}", e);
+                }
+            }
         }
+    }
+    if let Err(e) = restart_handle.await {
+        error!("Failed to join restart task: {}", e);
+    }
+}
+
+async fn restart_task(wait_for: Duration, event_tx: Sender<SswEvent>) {
+    const MESSAGE_PREFIX: &str = "/me is restarting in";
+    const DURATION_SPLITS: [usize; 6] = [3600, 900, 300, 60, 15, 1];
+    let mut time_left = wait_for;
+    for split in DURATION_SPLITS.iter() {
+        let split_duration = Duration::from_secs(*split as u64);
+        let mut ticker = tokio::time::interval(split_duration);
+        ticker.tick().await; // immediately tick to start
+        while time_left > split_duration {
+            let msg = format!("{} {}", MESSAGE_PREFIX, DurationString::from(time_left));
+            if let Err(e) = event_tx.send(SswEvent::StdinMessage(msg)).await {
+                error!("Failed to send restart notification: {}", e);
+            }
+            ticker.tick().await;
+            time_left -= split_duration;
+        }
+    }
+    // last tick
+    let msg = format!("{} {}", MESSAGE_PREFIX, DurationString::from(time_left));
+    if let Err(e) = event_tx.send(SswEvent::StdinMessage(msg)).await {
+        error!("Failed to send restart notification: {}", e);
+    }
+    if let Err(e) = event_tx
+        .send(SswEvent::ForceRestart("Periodic restart".to_string()))
+        .await
+    {
+        error!("Failed to send stop command: {}", e);
     }
 }
 
