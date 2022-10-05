@@ -123,10 +123,12 @@ async fn run_ssw_event_loop(
             break;
         }
         let event = event.unwrap();
-        let current_server_status = *mc_server
-            .status()
-            .lock()
-            .expect("Failed to lock on server status");
+        let current_server_status = {
+            *mc_server
+                .status()
+                .lock()
+                .expect("Failed to lock on server status")
+        };
         match event {
             SswEvent::StdinMessage(msg) => {
                 let command_with_args: Vec<&str> = msg.split_whitespace().collect();
