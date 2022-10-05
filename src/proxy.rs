@@ -259,8 +259,8 @@ async fn connection_manager(
             },
             _ = connection_manager_token.cancelled() => {
                 if let Some(shutdown_task) = shutdown_task {
-                    debug!("Cancelling shutdown task");
                     shutdown_task.abort();
+                    debug!("Shutdown task cancelled");
                 }
                 info!("Waiting for all proxy connections to close");
                 futures::future::join_all(connections.drain().map(|(_, client)| client.handle)).await;
