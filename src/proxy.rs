@@ -9,16 +9,13 @@ use log::{debug, error, info, warn};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::{
-        broadcast,
-        mpsc::{Receiver, Sender},
-    },
+    sync::{broadcast, mpsc},
     task::JoinHandle,
     time::Duration,
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::minecraft::{MCServerState, DEFAULT_MC_PORT};
+use crate::minecraft::{MCServerState, SswConfig, DEFAULT_MC_PORT};
 use crate::SswEvent;
 
 enum ConnectionManagerEvent {
@@ -33,6 +30,19 @@ struct ConnectedClient {
     is_real: bool,
 }
 
+pub struct ProxyConfig {
+    /// SSW config to use.
+    pub ssw_config: SswConfig,
+    /// Thread-safe mutex around the Minecraft server state.
+    pub server_state: Arc<Mutex<MCServerState>>,
+    /// Sender to send events to the main thread.
+    pub ssw_event_tx: mpsc::Sender<SswEvent>,
+    /// Receiver to receive Minecraft server port changes.
+    pub server_port_rx: mpsc::Receiver<u16>,
+    /// Receiver to receive Minecraft server state changes.
+    pub server_state_rx: broadcast::Receiver<MCServerState>,
+}
+
 /// Runs the proxy server
 ///
 /// This includes a connection manager that keeps track of all connections as well as a TCP listener
@@ -40,25 +50,27 @@ struct ConnectedClient {
 ///
 /// # Arguments
 ///
-/// * `ssw_port` - The port for the proxy to listen on
+/// * `config` - The ProxyConfig struct containing all the necessary information to run the proxy
 /// * `cancellation_token` - The cancellation token to use
 ///
 /// # Errors
 ///
 /// An error is returned if the TCP listener fails to bind to the port or accept a new connection.
 pub async fn run_proxy(
-    ssw_port: u16,
-    server_state: Arc<Mutex<MCServerState>>,
+    config: ProxyConfig,
     cancellation_token: CancellationToken,
-    ssw_event_tx: Sender<SswEvent>,
-    mut server_port_rx: Receiver<u16>,
-    server_state_rx: broadcast::Receiver<MCServerState>,
 ) -> io::Result<()> {
-    // TODO: extract proxy config struct because the parameter list is getting long
+    let ProxyConfig {
+        ssw_config,
+        server_state,
+        ssw_event_tx,
+        mut server_port_rx,
+        server_state_rx,
+    } = config;
     const REAL_CONNECTION_SECS: u64 = 5;
-    debug!("Starting proxy on port {}", ssw_port);
+    debug!("Starting proxy on port {}", ssw_config.ssw_port);
     // TODO: optional command line arg for IP
-    let addr = format!("{}:{}", "0.0.0.0", ssw_port);
+    let addr = format!("{}:{}", "0.0.0.0", ssw_config.ssw_port);
 
     let listener = TcpListener::bind(&addr).await?;
     debug!("Listening on {}", addr);
@@ -85,7 +97,7 @@ pub async fn run_proxy(
         } else {
             server_port_rx.recv().await.unwrap_or(DEFAULT_MC_PORT)
         };
-        if mc_port == ssw_port {
+        if mc_port == ssw_config.ssw_port {
             warn!(
                 "MC port is the same as SSW port, ignoring connection from {}",
                 client_addr
@@ -157,7 +169,7 @@ pub async fn run_proxy(
 /// * `connection_manager_rx` - The channel to receive connection events from
 /// * `cancellation_token` - The cancellation token to use
 async fn connection_manager(
-    mut connection_manager_rx: Receiver<ConnectionManagerEvent>,
+    mut connection_manager_rx: mpsc::Receiver<ConnectionManagerEvent>,
     mut server_state_channel: broadcast::Receiver<MCServerState>,
     connection_manager_token: CancellationToken,
     server_state: Arc<Mutex<MCServerState>>,

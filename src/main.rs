@@ -25,7 +25,8 @@ use clap::Parser;
 use flate2::{Compression, GzBuilder};
 use log::{debug, error, info, warn, LevelFilter};
 use manifest::load_versions;
-use minecraft::MCServerState;
+use minecraft::{MCServerState, SswConfig};
+use proxy::ProxyConfig;
 use simplelog::{
     format_description, ColorChoice, CombinedLogger, TermLogger, TerminalMode, ThreadLogMode,
     WriteLogger,
@@ -92,10 +93,9 @@ async fn main() -> io::Result<()> {
             error!("failed to load version: {}", e);
         }
     }
-    let port = mc_server.ssw_config.ssw_port;
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<SswEvent>(100);
     let (proxy_handle, proxy_cancel_token, proxy_tx) = start_proxy_task(
-        port,
+        mc_server.ssw_config.clone(),
         mc_server.status(),
         mc_server.subscribe_to_state_changes(),
         event_tx.clone(),
@@ -380,7 +380,7 @@ fn print_help() {
 ///
 /// returns: `(JoinHandle<()>, CancellationToken)`
 fn start_proxy_task(
-    port: u16,
+    ssw_config: SswConfig,
     server_state: Arc<Mutex<MCServerState>>,
     server_state_rx: broadcast::Receiver<MCServerState>,
     event_tx: Sender<SswEvent>,
@@ -388,10 +388,18 @@ fn start_proxy_task(
     let token = CancellationToken::new();
     let cloned_token = token.clone();
     let (proxy_tx, proxy_rx) = tokio::sync::mpsc::channel::<u16>(100);
+    let port = ssw_config.ssw_port;
+    let proxy_config = ProxyConfig {
+        ssw_config,
+        server_state,
+        ssw_event_tx: event_tx,
+        server_port_rx: proxy_rx,
+        server_state_rx,
+    };
     let handle = tokio::spawn(async move {
         let inner_clone = cloned_token.clone();
         select! {
-            r = run_proxy(port, server_state, inner_clone, event_tx, proxy_rx, server_state_rx) => {
+            r = run_proxy(proxy_config, inner_clone) => {
                 if let Err(e) = r {
                     if e.kind() == io::ErrorKind::AddrInUse {
                         error!("Failed to start proxy: port {} is already in use", port);
