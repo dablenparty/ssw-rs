@@ -219,7 +219,15 @@ async fn run_ssw_event_loop(
                     error!("Failed to send port to proxy: {:?}", e);
                 }
             }
-            SswEvent::ForceShutdown(reason) => todo!(),
+            SswEvent::ForceShutdown(reason) => {
+                info!("Force shutdown requested: {}", reason);
+                if let Err(e) = mc_server.stop().await {
+                    error!("Failed to send stop command to server: {:?}", e);
+                }
+                if let Err(e) = mc_server.wait_for_exit().await {
+                    error!("Failed to wait for server to exit: {}", e);
+                }
+            }
         }
     }
 }
