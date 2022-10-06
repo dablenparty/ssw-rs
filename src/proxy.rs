@@ -76,6 +76,7 @@ pub async fn run_proxy(
 
     let (connection_manager_tx, connection_manager_rx) =
         tokio::sync::mpsc::channel::<ConnectionManagerEvent>(100);
+    let shutdown_timeout = Duration::from_secs_f64(ssw_config.shutdown_timeout * 60.0);
     // TODO: when error handling is improved, shut this down properly
     let connection_manager_token = cancellation_token.clone();
     let _connection_manager_handle = tokio::spawn(connection_manager(
@@ -84,7 +85,7 @@ pub async fn run_proxy(
         ssw_event_tx.clone(),
         connection_manager_token,
         server_state,
-        Duration::from_secs_f64(ssw_config.shutdown_timeout * 60.0),
+        shutdown_timeout,
     ));
 
     loop {
@@ -129,7 +130,7 @@ pub async fn run_proxy(
                     r = connection_handler(client, mc_port) => {
                         if let Err(e) = r {
                             warn!("Error handling connection: {}", e);
-                            if e.kind() == io::ErrorKind::ConnectionRefused {
+                            if e.kind() == io::ErrorKind::ConnectionRefused && !shutdown_timeout.is_zero() {
                                 info!("Connection accepted when Minecraft server is not running, starting it");
                                 if let Err(e) = event_tx_clone.send(SswEvent::ForceStartup("Connection accepted".to_string())).await {
                                     error!("Failed to force startup: {}", e);
@@ -191,10 +192,11 @@ async fn connection_manager(
     loop {
         // unwrap is OK because it will only be checked if `is_none()` returns false (meaning it is Some)
         if connections.is_empty()
+            && !shutdown_task_duration.is_zero()
             && (shutdown_task.is_none() || shutdown_task.as_ref().unwrap().is_finished())
         {
             let current_state = { *server_state.lock().unwrap() };
-            if current_state == MCServerState::Running && !shutdown_task_duration.is_zero() {
+            if current_state == MCServerState::Running {
                 info!(
                     "Server is empty, setting shutdown timer for {:.2} minutes",
                     shutdown_task_duration.as_secs_f64() / 60.0
