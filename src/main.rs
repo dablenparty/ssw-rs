@@ -57,18 +57,18 @@ pub enum SswEvent {
 /// Simple Server Wrapper (SSW) is a simple wrapper for Minecraft servers, allowing for easy
 /// automation of some simple server management features.
 #[derive(Parser, Debug)]
-#[clap(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None)]
 struct CommandLineArgs {
-    #[clap(forbid_empty_values = true)]
-    /// The path to the Minecraft server jar file.
+    /// The path to the Minecraft server JAR file.
+    #[arg(required = true)]
     server_jar: PathBuf,
 
-    #[clap(short, long, value_parser, default_value_t = LevelFilter::Info)]
     /// The log level to use.
+    #[arg(short, long, value_parser, default_value_t = LevelFilter::Info)]
     log_level: LevelFilter,
 
-    #[clap(short, long, takes_value = false)]
-    /// Whether to refresh the Minecraft server manifest.
+    /// Refreshes the Minecraft version manifest.
+    #[arg(short, long)]
     refresh_manifest: bool,
 }
 
