@@ -30,6 +30,8 @@ struct ConnectedClient {
 }
 
 pub struct ProxyConfig {
+    /// IP address to listen on (without port).
+    pub ip: String,
     /// SSW config to use.
     pub ssw_config: SswConfig,
     /// Thread-safe mutex around the Minecraft server state.
@@ -61,15 +63,14 @@ pub async fn run_proxy(
 ) -> io::Result<()> {
     const REAL_CONNECTION_SECS: u64 = 5;
     let ProxyConfig {
-        ssw_config,
-        server_state,
-        ssw_event_tx,
+        ip,
         mut server_port_rx,
         server_state_rx,
+        server_state,
+        ssw_config,
+        ssw_event_tx,
     } = config;
-    debug!("Starting proxy on port {}", ssw_config.ssw_port);
-    // TODO: optional command line arg for IP
-    let addr = format!("{}:{}", "0.0.0.0", ssw_config.ssw_port);
+    let addr = format!("{}:{}", ip, ssw_config.ssw_port);
 
     let listener = TcpListener::bind(&addr).await?;
     debug!("Listening on {}", addr);

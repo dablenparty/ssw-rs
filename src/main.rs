@@ -70,6 +70,10 @@ struct CommandLineArgs {
     /// Refreshes the Minecraft version manifest.
     #[arg(short, long)]
     refresh_manifest: bool,
+
+    /// Binds the proxy to the specific address.
+    #[arg(short, long, value_parser, default_value_t = String::from("0.0.0.0"))]
+    proxy_ip: String,
 }
 
 const EXIT_COMMAND: &str = "exit";
@@ -81,7 +85,7 @@ async fn main() -> io::Result<()> {
         error!("failed to initialize logger: {:?}", e);
         std::process::exit(1);
     }
-    debug!("Parsed command line arguments: {:?}", args);
+    debug!("Parsed args: {:#?}", args);
     let cargo_version = env!("CARGO_PKG_VERSION");
     println!("SSW Console v{}", cargo_version);
     if args.refresh_manifest {
@@ -101,6 +105,7 @@ async fn main() -> io::Result<()> {
     let (event_tx, event_rx) = tokio::sync::mpsc::channel::<SswEvent>(100);
     let (proxy_handle, proxy_cancel_token, proxy_tx) = start_proxy_task(
         mc_server.ssw_config.clone(),
+        args.proxy_ip,
         mc_server.status(),
         mc_server.subscribe_to_state_changes(),
         event_tx.clone(),
@@ -544,6 +549,7 @@ fn print_help() {
 /// returns: `(JoinHandle<()>, CancellationToken, Sender<u16>)`
 fn start_proxy_task(
     ssw_config: SswConfig,
+    proxy_ip: String,
     server_state: Arc<Mutex<MCServerState>>,
     server_state_rx: broadcast::Receiver<MCServerState>,
     event_tx: Sender<SswEvent>,
@@ -558,6 +564,7 @@ fn start_proxy_task(
         ssw_event_tx: event_tx,
         server_port_rx: proxy_rx,
         server_state_rx,
+        ip: proxy_ip,
     };
     let handle = tokio::spawn(async move {
         let inner_clone = cloned_token.clone();
