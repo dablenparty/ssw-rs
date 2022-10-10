@@ -1,0 +1,24 @@
+name: Release artifacts from tag
+
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build with Cargo in Release mode
+        run: cargo run --release --verbose --bin release_script
+      - name: Publish GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "target/release/ssw_*"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          allowUpdates: true
