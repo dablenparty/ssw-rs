@@ -50,21 +50,18 @@ pub fn get_exe_parent_dir() -> PathBuf {
     } else {
         initial_path
     };
-    resolved_path
-        .parent()
-        .unwrap_or_else(|| {
-            debug!("failed to get parent of executable");
-            Path::new(".")
-        })
-        .canonicalize()
-        .unwrap_or_else(|e| {
-            debug!(
-                "failed to canonicalize path {}: {}",
-                resolved_path.display(),
-                e
-            );
-            resolved_path
-        })
+    dunce::canonicalize(resolved_path.parent().unwrap_or_else(|| {
+        debug!("failed to get parent of executable");
+        Path::new(".")
+    }))
+    .unwrap_or_else(|e| {
+        debug!(
+            "failed to canonicalize path {}: {}",
+            resolved_path.display(),
+            e
+        );
+        resolved_path
+    })
 }
 
 /// Synchronously creates a directory if it does not exist, failing if some other error occurs
@@ -127,8 +124,7 @@ pub async fn get_java_version(java_executable: &Path) -> io::Result<String> {
         .arg("-version")
         .output()
         .await?;
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let version = match JAVA_VERSION_REGEX.captures(stderr.as_bytes()) {
+    let version = match JAVA_VERSION_REGEX.captures(&output.stderr) {
         Some(captures) => String::from_utf8_lossy(
             captures
                 .name("version")
@@ -138,7 +134,7 @@ pub async fn get_java_version(java_executable: &Path) -> io::Result<String> {
         None => {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!("failed to get java version from {}", stderr),
+                format!("failed to get java version from stderr"),
             ))
         }
     };

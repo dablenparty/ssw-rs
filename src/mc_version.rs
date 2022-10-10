@@ -74,7 +74,7 @@ pub async fn get_required_java_version(mc_version: &MinecraftVersion) -> reqwest
 
 /// Tries to read the Minecraft version from every jar file found in a given directory.
 ///
-/// Newer versions of Minecraft store the version in a `version.json` file packaged in with the server jar.
+/// Newer versions of Minecraft (`1.14` and later) store the version in a `version.json` file packaged in with the server jar.
 /// This function tries to read the version from that file.
 ///
 /// The version ID string (e.g., `1.19`) will be returned if it is found, or `None` if it is not.

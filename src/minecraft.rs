@@ -149,6 +149,7 @@ pub struct MinecraftServer {
     exit_handler: Option<JoinHandle<()>>,
     /// A sender used to send messages to the servers stdin
     server_stdin_sender: Option<mpsc::Sender<String>>,
+    /// Broadcast channel pair for broadcasting server state changes
     server_status_broadcast_channels: (
         broadcast::Sender<MCServerState>,
         broadcast::Receiver<MCServerState>,
@@ -571,7 +572,14 @@ impl MinecraftServer {
     }
 }
 
-async fn pipe_stderr(mut stderr: tokio::process::ChildStderr, cloned_token: CancellationToken) {
+/// Pipes the stderr of the child process to the stdout
+/// of the current process.
+///
+/// # Arguments
+///
+/// * `stderr` - The stderr of the child process
+/// * `cancel_token` - The cancellation token for the pipe
+async fn pipe_stderr(mut stderr: tokio::process::ChildStderr, cancel_token: CancellationToken) {
     let mut stdout = tokio::io::stdout();
     select! {
         n = tokio::io::copy(&mut stderr, &mut stdout) => {
@@ -581,7 +589,7 @@ async fn pipe_stderr(mut stderr: tokio::process::ChildStderr, cloned_token: Canc
                 debug!("Finished reading from stderr");
             }
         }
-        _ = cloned_token.cancelled() => {
+        _ = cancel_token.cancelled() => {
             debug!("stderr pipe cancelled");
         }
     }
@@ -592,7 +600,7 @@ async fn pipe_stderr(mut stderr: tokio::process::ChildStderr, cloned_token: Canc
 /// # Arguments:
 ///
 /// * `ssw_port` - The SSW port.
-/// * `server_port` - The Minecraft server port.
+/// * `server_port_value` - The Minecraft server port.
 ///
 /// returns: `bool`
 fn validate_port(ssw_port: u16, server_port_value: &Value) -> bool {
@@ -700,11 +708,12 @@ async fn save_properties(path: &Path, properties: &MCServerProperties) -> io::Re
 /// * `server_child_proc` - The child process to wait for
 /// * `pipe_handles` - A vector of tuples containing a `CancellationToken` and a `JoinHandle` for each pipe
 /// * `status` - The `Arc<Mutex<MCServerState>>` to set to `Stopped` when the server exits
+/// * `status_tx` - The `Sender` for the server status broadcast channel
 async fn exit_handler(
     mut server_child_proc: tokio::process::Child,
     pipe_handles: Vec<(CancellationToken, JoinHandle<()>)>,
-    status_clone: Arc<Mutex<MCServerState>>,
-    status_sender: broadcast::Sender<MCServerState>,
+    status: Arc<Mutex<MCServerState>>,
+    status_tx: broadcast::Sender<MCServerState>,
 ) {
     match server_child_proc.wait().await {
         Ok(status) => debug!("Server exited with status {}", status),
@@ -722,8 +731,8 @@ async fn exit_handler(
         }
     }
     debug!("Setting server state to Stopped");
-    *status_clone.lock().unwrap() = MCServerState::Stopped;
-    if let Err(err) = status_sender.send(MCServerState::Stopped) {
+    *status.lock().unwrap() = MCServerState::Stopped;
+    if let Err(err) = status_tx.send(MCServerState::Stopped) {
         error!("Error sending server state: {}", err);
     }
 }
@@ -738,6 +747,7 @@ async fn exit_handler(
 /// * `stdout` - The `ChildStdout` to pipe to this process's stdout.
 /// * `cancellation_token` - The `CancellationToken` to use to cancel the pipe.
 /// * `server_state` - The mutex lock used to update the server state.
+/// * `server_state_tx` - The `Sender` for the server status broadcast channel
 ///
 /// # Errors
 ///
@@ -746,7 +756,7 @@ async fn pipe_and_monitor_stdout(
     stdout: ChildStdout,
     cancellation_token: CancellationToken,
     server_state: Arc<Mutex<MCServerState>>,
-    server_state_sender: broadcast::Sender<MCServerState>,
+    server_state_tx: broadcast::Sender<MCServerState>,
 ) -> io::Result<()> {
     lazy_static! {
         static ref READY_REGEX: Regex =
@@ -773,7 +783,7 @@ async fn pipe_and_monitor_stdout(
                         if READY_REGEX.is_match(buf) {
                             debug!("Setting server state to Running");
                             *current_state_lock = MCServerState::Running;
-                            if let Err(err) = server_state_sender.send(MCServerState::Running) {
+                            if let Err(err) = server_state_tx.send(MCServerState::Running) {
                                 error!("Error sending server state: {}", err);
                             }
                         }
@@ -782,7 +792,7 @@ async fn pipe_and_monitor_stdout(
                         if STOPPING_REGEX.is_match(buf) {
                             debug!("Setting server state to Stopping");
                             *current_state_lock = MCServerState::Stopping;
-                            if let Err(err) = server_state_sender.send(MCServerState::Stopping) {
+                            if let Err(err) = server_state_tx.send(MCServerState::Stopping) {
                                 error!("Error sending server state: {}", err);
                             }
                         }

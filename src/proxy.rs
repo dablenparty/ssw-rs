@@ -130,6 +130,9 @@ pub async fn run_proxy(
                     r = connection_handler(client, mc_port) => {
                         if let Err(e) = r {
                             warn!("Error handling connection: {}", e);
+                            // occasionally, Minecraft will double send pings. While this is a bug in
+                            // Minecraft, this proxy will still send the ForceStartup message to
+                            // the main thread and a warning will be logged.
                             if e.kind() == io::ErrorKind::ConnectionRefused && !shutdown_timeout.is_zero() {
                                 info!("Connection accepted when Minecraft server is not running, starting it");
                                 if let Err(e) = event_tx_clone.send(SswEvent::ForceStartup("Connection accepted".to_string())).await {
@@ -177,12 +180,16 @@ pub async fn run_proxy(
 /// # Arguments
 ///
 /// * `connection_manager_rx` - The channel to receive connection events from
+/// * `server_state_rx` - The channel to receive server state changes from
+/// * `ssw_event_tx` - The channel to send SSW events to
 /// * `cancellation_token` - The cancellation token to use
+/// * `server_state` - Thread safe reference to the server state
+/// * `shutdown_task_duration` - The timeout to wait for the server to shutdown
 async fn connection_manager(
     mut connection_manager_rx: mpsc::Receiver<ConnectionManagerEvent>,
-    mut server_state_channel: broadcast::Receiver<MCServerState>,
-    ssw_event_sender: mpsc::Sender<SswEvent>,
-    connection_manager_token: CancellationToken,
+    mut server_state_rx: broadcast::Receiver<MCServerState>,
+    ssw_event_tx: mpsc::Sender<SswEvent>,
+    cancellation_token: CancellationToken,
     server_state: Arc<Mutex<MCServerState>>,
     shutdown_task_duration: Duration,
 ) {
@@ -201,7 +208,7 @@ async fn connection_manager(
                     "Server is empty, setting shutdown timer for {:.2} minutes",
                     shutdown_task_duration.as_secs_f64() / 60.0
                 );
-                let ssw_event_sender_clone = ssw_event_sender.clone();
+                let ssw_event_sender_clone = ssw_event_tx.clone();
                 shutdown_task = Some(tokio::spawn(async move {
                     tokio::time::sleep(shutdown_task_duration).await;
                     info!("Server is empty, shutting down");
@@ -252,14 +259,14 @@ async fn connection_manager(
                     error!("Connection manager channel closed");
                 }
             },
-            state = server_state_channel.recv() => {
+            state = server_state_rx.recv() => {
                 // TODO: this is a bit of a hack, but it works for now
                 // forces a re-check of connections if server state changes
                 if let Err(e) = state {
                     error!("Error waiting for server state: {}", e);
                 }
             },
-            _ = connection_manager_token.cancelled() => {
+            _ = cancellation_token.cancelled() => {
                 if let Some(shutdown_task) = shutdown_task {
                     shutdown_task.abort();
                     debug!("Shutdown task cancelled");
@@ -279,6 +286,7 @@ async fn connection_manager(
 /// # Arguments
 ///
 /// * `client_stream` - The `TcpStream` from the client.
+/// * `mc_port` - The port the Minecraft server is running on.
 ///
 /// returns: `io::Result<()>`
 async fn connection_handler(mut client_stream: TcpStream, mc_port: u16) -> io::Result<()> {
