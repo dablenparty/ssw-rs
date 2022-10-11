@@ -134,7 +134,7 @@ pub async fn get_java_version(java_executable: &Path) -> io::Result<String> {
         None => {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!("failed to get java version from stderr"),
+                "failed to get java version from stderr".to_string(),
             ))
         }
     };
