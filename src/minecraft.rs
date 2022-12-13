@@ -526,6 +526,7 @@ impl MinecraftServer {
             // the java executable is stored in the config directory
             tokio::fs::read_to_string(java_exec_store)
                 .await
+                .map(|s| s.trim().to_string())
                 .map(PathBuf::from)?
         } else {
             // try to find java in PATH
