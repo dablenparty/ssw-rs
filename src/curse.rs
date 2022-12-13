@@ -1,7 +1,7 @@
 use std::{io, path::Path};
 
 use futures::{stream, StreamExt};
-use log::{debug, info};
+use log::{debug, error, info};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -120,19 +120,36 @@ impl CurseModpack {
                     target_path.display()
                 );
                 async move {
+                    if download_url == "null" {
+                        return Err(crate::ssw_error::Error::IoError(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!(
+                                "downloadUrl for {} is null",
+                                data["displayName"].to_string()
+                            ),
+                        )));
+                    }
                     if target_path.exists() {
                         info!("{} already exists, skipping", target_path.display());
                         return Ok(());
                     }
                     let mut file_handle = tokio::fs::File::create(&target_path).await?;
                     let dl_response = client.get(&download_url).send().await?.error_for_status()?;
-                    let content = dl_response.text().await?;
-                    tokio::io::copy(&mut content.as_bytes(), &mut file_handle).await?;
+                    let content = dl_response.bytes().await?;
+                    tokio::io::copy(&mut content.to_vec().as_slice(), &mut file_handle).await?;
+                    // check if the file is empty
+                    if target_path.metadata()?.len() == 0 {
+                        panic!("{} is empty", target_path.display());
+                    }
                     Ok::<_, crate::ssw_error::Error>(())
                 }
             })
             .buffer_unordered(num_physical_cpus * 2)
-            .for_each(|_| async {})
+            .for_each(|r| async {
+                if let Err(e) = r {
+                    error!("{}", e);
+                }
+            })
             .await;
         for i in 0..self.archive.len() {
             let mut file = self.archive.by_index(i)?;
