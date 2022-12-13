@@ -75,18 +75,34 @@ struct CommandLineArgs {
     /// Binds the proxy to the specific address.
     #[arg(short, long, value_parser, default_value_t = String::from("0.0.0.0"))]
     proxy_ip: String,
+
+    /// Installs a CurseForge modpack to the server.
+    #[arg(short = 'm', long = "modpack", value_parser)]
+    modpack_path: PathBuf,
 }
 
 const EXIT_COMMAND: &str = "exit";
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    dotenv::dotenv().ok().expect("failed to load .env file");
     let args = CommandLineArgs::parse();
     if let Err(e) = init_logger(args.log_level) {
         error!("failed to initialize logger: {:?}", e);
         std::process::exit(1);
     }
     debug!("Parsed args: {:#?}", args);
+    if let Some(modpack_path) = args.modpack_path.to_str() {
+        info!("Installing modpack from {}", modpack_path);
+        let mut modpack = curse::CurseModpack::load(modpack_path).unwrap_or_else(|e| {
+            error!("failed to load modpack: {}", e);
+            std::process::exit(1);
+        });
+        if let Err(err) = modpack.install_to(&args.server_jar).await {
+            error!("failed to install modpack: {}", err);
+            std::process::exit(1);
+        }
+    };
     let cargo_version = env!("CARGO_PKG_VERSION");
     println!("SSW Console v{}", cargo_version);
     if args.refresh_manifest {
