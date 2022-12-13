@@ -78,7 +78,7 @@ struct CommandLineArgs {
 
     /// Installs a CurseForge modpack to the server.
     #[arg(short = 'm', long = "modpack", value_parser)]
-    modpack_path: PathBuf,
+    modpack_path: Option<PathBuf>,
 }
 
 const EXIT_COMMAND: &str = "exit";
@@ -92,9 +92,9 @@ async fn main() -> io::Result<()> {
         std::process::exit(1);
     }
     debug!("Parsed args: {:#?}", args);
-    if let Some(modpack_path) = args.modpack_path.to_str() {
-        info!("Installing modpack from {}", modpack_path);
-        let mut modpack = curse::CurseModpack::load(modpack_path).unwrap_or_else(|e| {
+    if let Some(modpack_path) = args.modpack_path {
+        info!("Installing modpack from {}", modpack_path.display());
+        let mut modpack = curse::CurseModpack::load(modpack_path.to_str().unwrap()).unwrap_or_else(|e| {
             error!("failed to load modpack: {}", e);
             std::process::exit(1);
         });
