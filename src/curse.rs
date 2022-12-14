@@ -113,7 +113,7 @@ impl CurseModpack {
                 let target_parent = target_dir.join(parent_folder);
                 async move {
                     async_create_dir_if_not_exists(&target_parent).await?;
-                    let target_path = target_parent.join(file_name);
+                    let target_path = target_parent.join(&file_name);
                     debug!(
                         "downloading {} to {}",
                         data["displayName"],
@@ -122,7 +122,10 @@ impl CurseModpack {
                     if download_url == "null" {
                         return Err(crate::ssw_error::Error::IoError(io::Error::new(
                             io::ErrorKind::InvalidData,
-                            format!("downloadUrl for {} is null", data["displayName"]),
+                            format!(
+                                "downloadUrl for {} ({}) is null",
+                                data["displayName"], file_name
+                            ),
                         )));
                     }
                     if target_path.exists() {
