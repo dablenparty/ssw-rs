@@ -28,8 +28,8 @@ impl CurseFile {
         debug!("Requesting {}", url);
         let response = client
             .get(&url)
-            .header("X-API-Key", api_key)
             .header("Accept", "application/json")
+            .header("x-api-key", api_key)
             .send()
             .await?
             .error_for_status()?
@@ -97,7 +97,7 @@ impl CurseModpack {
                         warn!("Failed to get file info: {}", e);
                         None
                     },
-                    Some,
+                    |p| Some(p["data"].clone()),
                 )
             })
             .map(|data| {
