@@ -1,11 +1,11 @@
 use std::{io, path::Path};
 
 use futures::{stream, StreamExt};
-use log::{debug, error, info};
+use log::{debug, info, warn};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::ssw_error;
+use crate::{ssw_error, util::async_create_dir_if_not_exists};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CurseFile {
@@ -64,41 +64,42 @@ impl CurseModpack {
         Ok(Self { archive, manifest })
     }
 
-    pub async fn install_to(&mut self, server_jar: &Path) -> io::Result<()> {
+    pub async fn install_to(&mut self, server_jar: &Path) -> ssw_error::Result<()> {
         lazy_static::lazy_static! {
             static ref ILLEGAL_CHARS: regex::Regex = regex::Regex::new(r#"[\\/:*?"<>|]"#).expect("Failed to compile ILLEGAL_CHARS regex");
         }
         let target_dir = if server_jar.is_dir() {
             server_jar.to_path_buf()
         } else {
-            server_jar
-                .parent()
-                .ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "Server jar path is not in a folder",
-                    )
-                })?
-                .to_path_buf()
+            // unwrapping should be ok. if the server jar is a file, it should have a parent
+            // otherwise, the user is doing something weird and deserves to have their program panic
+            server_jar.parent().unwrap().to_path_buf()
         };
         debug!("modpack target directory: {}", target_dir.display());
         let num_cpus = num_cpus::get();
-        let num_physical_cpus = num_cpus::get_physical();
         let client = reqwest::Client::new();
-        // this variable should be validated when the program starts
-        let api_key = std::env::var("CURSE_API_KEY").unwrap();
+        let api_key = std::env::var("CURSE_API_KEY")?;
+        info!("Downloading {} mod files", self.manifest.files.len());
         stream::iter(&self.manifest.files)
             .map(|file| {
                 let client = &client;
                 let api_key = &api_key;
                 async move {
                     let info = file.get_info(client, api_key).await?;
-                    Ok::<_, crate::ssw_error::Error>(info)
+                    Ok::<_, ssw_error::Error>(info)
                 }
             })
             .buffer_unordered(num_cpus * 2)
             //? TODO: do this without cloning
-            .filter_map(|parsed| async move { parsed.ok().map(|p| p["data"].clone()) })
+            .filter_map(|parsed| async move {
+                parsed.map_or_else(
+                    |e| {
+                        warn!("Failed to get file info: {}", e);
+                        None
+                    },
+                    Some,
+                )
+            })
             .map(|data| {
                 let download_url = data["downloadUrl"].to_string().replace('"', "");
                 let file_name = data["fileName"].to_string();
@@ -108,68 +109,59 @@ impl CurseModpack {
                 } else {
                     "mods"
                 };
-                let target_parent = target_dir.join(parent_folder);
-                if !target_parent.exists() {
-                    std::fs::create_dir_all(&target_parent).ok();
-                }
-                let target_path = target_parent.join(file_name);
                 let client = &client;
-                info!(
-                    "downloading {} to {}",
-                    data["displayName"],
-                    target_path.display()
-                );
+                let target_parent = target_dir.join(parent_folder);
                 async move {
+                    async_create_dir_if_not_exists(&target_parent).await?;
+                    let target_path = target_parent.join(file_name);
+                    debug!(
+                        "downloading {} to {}",
+                        data["displayName"],
+                        target_path.display()
+                    );
                     if download_url == "null" {
                         return Err(crate::ssw_error::Error::IoError(io::Error::new(
                             io::ErrorKind::InvalidData,
-                            format!(
-                                "downloadUrl for {} is null",
-                                data["displayName"].to_string()
-                            ),
+                            format!("downloadUrl for {} is null", data["displayName"]),
                         )));
                     }
                     if target_path.exists() {
-                        info!("{} already exists, skipping", target_path.display());
+                        debug!("{} already exists, skipping", target_path.display());
                         return Ok(());
                     }
                     let mut file_handle = tokio::fs::File::create(&target_path).await?;
                     let dl_response = client.get(&download_url).send().await?.error_for_status()?;
                     let content = dl_response.bytes().await?;
                     tokio::io::copy(&mut content.to_vec().as_slice(), &mut file_handle).await?;
-                    // check if the file is empty
-                    if target_path.metadata()?.len() == 0 {
-                        panic!("{} is empty", target_path.display());
-                    }
-                    Ok::<_, crate::ssw_error::Error>(())
+                    Ok::<_, ssw_error::Error>(())
                 }
             })
-            .buffer_unordered(num_physical_cpus * 2)
+            .buffer_unordered(num_cpus)
             .for_each(|r| async {
                 if let Err(e) = r {
-                    error!("{}", e);
+                    warn!("{}", e);
                 }
             })
             .await;
+        info!("extracting overrides");
         for i in 0..self.archive.len() {
-            let mut file = self.archive.by_index(i)?;
+            let mut file = self
+                .archive
+                .by_index(i)
+                .map_err(|e| ssw_error::Error::IoError(e.into()))?;
             let enclosed_name = file.enclosed_name().unwrap();
-            if file.is_dir() || !enclosed_name.starts_with(&self.manifest.overrides) {
+            let stripped_name = enclosed_name.strip_prefix(&self.manifest.overrides);
+            if stripped_name.is_err() || file.is_dir() {
                 continue;
             }
-            let stripped_name = enclosed_name
-                .strip_prefix(&self.manifest.overrides)
-                .unwrap();
+            let stripped_name = stripped_name.unwrap();
             let target_path = target_dir.join(stripped_name);
             if target_path.exists() {
-                info!("{} already exists, skipping", target_path.display());
+                debug!("{} already exists, skipping", target_path.display());
                 continue;
             }
-            info!("extracting override to: {}", target_path.display());
-            let target_dir = target_path.parent().unwrap();
-            if !target_dir.exists() {
-                std::fs::create_dir_all(target_dir)?;
-            }
+            debug!("extracting override to: {}", target_path.display());
+            async_create_dir_if_not_exists(target_path.parent().unwrap()).await?;
             let mut target_file = std::fs::File::create(target_path)?;
             io::copy(&mut file, &mut target_file)?;
         }

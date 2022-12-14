@@ -12,7 +12,7 @@ mod util;
 
 use std::{
     io::{self, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -85,7 +85,7 @@ const EXIT_COMMAND: &str = "exit";
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    dotenv::dotenv().ok().expect("failed to load .env file");
+    dotenv::dotenv().map_or_else(|e| error!("failed to load .env file: {}", e), |_| ());
     let args = CommandLineArgs::parse();
     if let Err(e) = init_logger(args.log_level) {
         error!("failed to initialize logger: {:?}", e);
@@ -93,14 +93,8 @@ async fn main() -> io::Result<()> {
     }
     debug!("Parsed args: {:#?}", args);
     if let Some(modpack_path) = args.modpack_path {
-        info!("Installing modpack from {}", modpack_path.display());
-        let mut modpack = curse::CurseModpack::load(modpack_path.to_str().unwrap()).unwrap_or_else(|e| {
-            error!("failed to load modpack: {}", e);
-            std::process::exit(1);
-        });
-        if let Err(err) = modpack.install_to(&args.server_jar).await {
-            error!("failed to install modpack: {}", err);
-            std::process::exit(1);
+        if let Err(e) = install_curse_modpack(&modpack_path, &args.server_jar).await {
+            error!("failed to install modpack: {}", e);
         }
     };
     let cargo_version = env!("CARGO_PKG_VERSION");
@@ -138,6 +132,13 @@ async fn main() -> io::Result<()> {
     .await;
     stdin_handle.await?;
     proxy_handle.await?;
+    Ok(())
+}
+
+async fn install_curse_modpack(modpack_path: &Path, server_jar: &Path) -> ssw_error::Result<()> {
+    info!("Installing modpack from {}", modpack_path.display());
+    let mut modpack = curse::CurseModpack::load(modpack_path.to_str().unwrap())?;
+    modpack.install_to(server_jar).await?;
     Ok(())
 }
 
