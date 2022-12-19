@@ -7,6 +7,7 @@ use std::{
 
 use log::{debug, error, info, warn};
 use tokio::{
+    io::AsyncReadExt,
     net::{TcpListener, TcpStream},
     select,
     sync::{broadcast, mpsc},
@@ -291,7 +292,27 @@ async fn connection_manager(
 ///
 /// returns: `io::Result<()>`
 async fn connection_handler(mut client_stream: TcpStream, mc_port: u16) -> io::Result<()> {
-    let mut server_stream = TcpStream::connect(format!("127.0.0.1:{}", mc_port)).await?;
+    let mut server_stream = match TcpStream::connect(format!("127.0.0.1:{}", mc_port)).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            if e.kind() != io::ErrorKind::ConnectionRefused {
+                return Err(e);
+            }
+            // this part checks if the packet is a client connection or just a ping
+            // Minecraft packets are prefixed with a byte that indicates the size of the packet
+            let mut buf = [0u8; 1];
+            client_stream.read_exact(&mut buf).await?;
+            let next_size = buf[0] as usize;
+            let mut buf = vec![0u8; next_size];
+            client_stream.read_exact(&mut buf).await?;
+            if buf[next_size - 1] == '\x02' as u8 {
+                debug!("Client is trying to connect to the server");
+                // the ConnectionRefused error is expected here
+                return Err(e);
+            }
+            return Ok(());
+        }
+    };
     // I'm upset I didn't find this sooner. This function solved almost all performance issues with
     // the proxy and passing TCP packets between the client and server.
     tokio::io::copy_bidirectional(&mut client_stream, &mut server_stream).await?;
