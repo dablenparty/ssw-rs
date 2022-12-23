@@ -3,7 +3,7 @@ use std::{io, path::PathBuf};
 use log::debug;
 use serde::Deserialize;
 
-use crate::{mc_version::MinecraftVersion, ssw_error};
+use crate::{mc_version::MinecraftVersion, ssw_error, util::async_create_dir_if_not_exists};
 
 const MANIFEST_V2_LINK: &str = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
 
@@ -67,6 +67,9 @@ pub async fn refresh_manifest() -> ssw_error::Result<()> {
     );
     let manifest = reqwest::get(MANIFEST_V2_LINK).await?.text().await?;
     let manifest_location = get_manifest_location();
+    // minecraft might not be installed, so we need to create the directory
+    let manifest_parent = manifest_location.parent().unwrap();
+    async_create_dir_if_not_exists(manifest_parent).await?;
     debug!("Saving new manifest to {}", manifest_location.display());
     tokio::fs::write(manifest_location, manifest).await?;
     Ok(())

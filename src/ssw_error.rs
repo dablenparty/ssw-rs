@@ -1,4 +1,4 @@
-use std::{error, fmt, io, num};
+use std::{env, error, fmt, io, num};
 
 /// An error wrapper type used across the entire crate, usually where multiple error types are
 /// returned.
@@ -14,6 +14,7 @@ pub enum Error {
     MissingMinecraftVersion,
     ParseIntError(num::ParseIntError),
     ReqwestError(reqwest::Error),
+    EnvVarError(env::VarError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -32,6 +33,7 @@ impl fmt::Display for Error {
             Error::MissingMinecraftVersion => write!(f, "Minecraft version not specified"),
             Error::ParseIntError(e) => write!(f, "Parse error: {}", e),
             Error::JsonError(e) => write!(f, "JSON error: {}", e),
+            Error::EnvVarError(e) => write!(f, "Environment variable error: {}", e),
         }
     }
 }
@@ -65,5 +67,11 @@ impl From<num::ParseIntError> for Error {
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Self {
         Error::JsonError(e)
+    }
+}
+
+impl From<env::VarError> for Error {
+    fn from(e: env::VarError) -> Self {
+        Error::EnvVarError(e)
     }
 }

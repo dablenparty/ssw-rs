@@ -526,6 +526,7 @@ impl MinecraftServer {
             // the java executable is stored in the config directory
             tokio::fs::read_to_string(java_exec_store)
                 .await
+                .map(|s| s.trim().to_string())
                 .map(PathBuf::from)?
         } else {
             // try to find java in PATH
@@ -730,7 +731,9 @@ async fn exit_handler(
             error!("Error waiting for pipe: {}", err);
         }
     }
-    debug!("Setting server state to Stopped");
+    // this one goes to INFO so that the user knows the server has stopped
+    // without having to enable debug logging
+    info!("Setting server state to Stopped");
     *status.lock().unwrap() = MCServerState::Stopped;
     if let Err(err) = status_tx.send(MCServerState::Stopped) {
         error!("Error sending server state: {}", err);
