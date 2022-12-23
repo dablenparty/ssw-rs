@@ -305,7 +305,7 @@ async fn connection_handler(mut client_stream: TcpStream, mc_port: u16) -> io::R
             let next_size = buf[0] as usize;
             let mut buf = vec![0u8; next_size];
             client_stream.read_exact(&mut buf).await?;
-            if buf[next_size - 1] == '\x02' as u8 {
+            if buf[next_size - 1] == b'\x02' {
                 debug!("Client is trying to connect to the server");
                 // the ConnectionRefused error is expected here
                 return Err(e);
