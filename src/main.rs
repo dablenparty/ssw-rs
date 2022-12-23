@@ -80,7 +80,6 @@ const EXIT_COMMAND: &str = "exit";
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    dotenv::dotenv().map_or_else(|e| error!("failed to load .env file: {}", e), |_| ());
     let args = CommandLineArgs::parse();
     if let Err(e) = init_logger(args.log_level) {
         error!("failed to initialize logger: {:?}", e);
