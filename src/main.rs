@@ -1,7 +1,6 @@
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(clippy::module_name_repetitions, clippy::uninlined_format_args)]
 
-mod curse;
 mod log4j;
 mod manifest;
 mod mc_version;
@@ -12,7 +11,7 @@ mod util;
 
 use std::{
     io::{self, Write},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -75,10 +74,6 @@ struct CommandLineArgs {
     /// Binds the proxy to the specific address.
     #[arg(short, long, value_parser, default_value_t = String::from("0.0.0.0"))]
     proxy_ip: String,
-
-    /// Installs a CurseForge modpack to the server.
-    #[arg(short = 'm', long = "modpack", value_parser)]
-    modpack_path: Option<PathBuf>,
 }
 
 const EXIT_COMMAND: &str = "exit";
@@ -92,11 +87,6 @@ async fn main() -> io::Result<()> {
         std::process::exit(1);
     }
     debug!("Parsed args: {:#?}", args);
-    if let Some(modpack_path) = args.modpack_path {
-        if let Err(e) = install_curse_modpack(&modpack_path, &args.server_jar).await {
-            error!("failed to install modpack: {}", e);
-        }
-    };
     let cargo_version = env!("CARGO_PKG_VERSION");
     println!("SSW Console v{}", cargo_version);
     if args.refresh_manifest {
@@ -132,13 +122,6 @@ async fn main() -> io::Result<()> {
     .await;
     stdin_handle.await?;
     proxy_handle.await?;
-    Ok(())
-}
-
-async fn install_curse_modpack(modpack_path: &Path, server_jar: &Path) -> ssw_error::Result<()> {
-    info!("Installing modpack from {}", modpack_path.display());
-    let mut modpack = curse::CurseModpack::load(modpack_path.to_str().unwrap())?;
-    modpack.install_to(server_jar).await?;
     Ok(())
 }
 
