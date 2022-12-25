@@ -74,6 +74,11 @@ struct CommandLineArgs {
     /// Binds the proxy to the specific address.
     #[arg(short, long, value_parser, default_value_t = String::from("0.0.0.0"))]
     proxy_ip: String,
+
+    /// Disables output from the Minecraft server. This only affects the output that is sent to the
+    /// console, not the log file. That is managed by the server itself, and not SSW.
+    #[arg(short, long)]
+    no_mc_output: bool,
 }
 
 const EXIT_COMMAND: &str = "exit";
@@ -97,6 +102,7 @@ async fn main() -> io::Result<()> {
         }
     }
     let mut mc_server = MinecraftServer::new(dunce::canonicalize(args.server_jar)?).await;
+    mc_server.show_output = !args.no_mc_output;
     if mc_server.ssw_config.mc_version.is_none() || args.refresh_manifest {
         if let Err(e) = mc_server.load_version().await {
             error!("failed to load version: {}", e);

@@ -160,6 +160,7 @@ pub struct MinecraftServer {
     properties: Option<MCServerProperties>,
     /// The SSW server configuration
     pub ssw_config: SswConfig,
+    pub show_output: bool,
 }
 
 impl MinecraftServer {
@@ -185,6 +186,7 @@ impl MinecraftServer {
                 SswConfig::default()
             }),
             properties: None,
+            show_output: true,
         };
         inst.load_properties().await;
         inst
@@ -234,8 +236,8 @@ impl MinecraftServer {
         if let Some(ref sender) = self.server_stdin_sender {
             sender.send(command).await
         } else {
-            warn!("Attempted to send command to stopped server");
-            Ok(())
+            let error_message = format!("Attempted to send command to stopped server: {}", command);
+            Err(mpsc::error::SendError(error_message))
         }
     }
 
@@ -428,40 +430,8 @@ impl MinecraftServer {
             .stdout(process::Stdio::piped())
             .stdin(process::Stdio::piped())
             .spawn()?;
-        // pipe stdout and stderr to stdout
-        let stdout = child.stdout.take().unwrap();
-        let stdout_token = CancellationToken::new();
-        let cloned_token = stdout_token.clone();
-        let cloned_state = self.state.clone();
-        let cloned_state_sender = self.server_status_broadcast_channels.0.clone();
-        let stdout_handle = tokio::spawn(async move {
-            if let Err(err) =
-                pipe_and_monitor_stdout(stdout, cloned_token, cloned_state, cloned_state_sender)
-                    .await
-            {
-                error!("Error reading from stdout: {}", err);
-            }
-        });
-        let mut pipe_handles = vec![(stdout_token, stdout_handle)];
 
-        let stderr = child.stderr.take().unwrap();
-        let stderr_token = CancellationToken::new();
-        let cloned_token = stderr_token.clone();
-        let stderr_handle = tokio::spawn(pipe_stderr(stderr, cloned_token));
-        pipe_handles.push((stderr_token, stderr_handle));
-
-        // pipe stdin to child stdin
-        let proc_stdin = child.stdin.take().unwrap();
-        let stdin_token = CancellationToken::new();
-        let cloned_token = stdin_token.clone();
-        let (stdin_tx, stdin_rx) = tokio::sync::mpsc::channel::<String>(3);
-        self.server_stdin_sender = Some(stdin_tx);
-        let stdin_handle = tokio::spawn(async move {
-            if let Err(err) = pipe_stdin(proc_stdin, stdin_rx, cloned_token).await {
-                error!("Error reading from stdin: {}", err);
-            }
-        });
-        pipe_handles.push((stdin_token, stdin_handle));
+        let pipe_handles = self.start_mc_output_pipes(&mut child);
 
         let status_clone = self.state.clone();
         let status_sender_clone = self.server_status_broadcast_channels.0.clone();
@@ -474,6 +444,53 @@ impl MinecraftServer {
         self.exit_handler = Some(exit_handler_handle);
 
         Ok(())
+    }
+
+    fn start_mc_output_pipes(
+        &mut self,
+        child: &mut tokio::process::Child,
+    ) -> Vec<(CancellationToken, JoinHandle<()>)> {
+        // pipe stdout and stderr to stdout
+        let stdout = child.stdout.take().unwrap();
+        let stdout_token = CancellationToken::new();
+        let cloned_token = stdout_token.clone();
+        let cloned_state = self.state.clone();
+        let cloned_state_sender = self.server_status_broadcast_channels.0.clone();
+        let show_output = self.show_output;
+        let stdout_handle = tokio::spawn(async move {
+            if let Err(err) = pipe_and_monitor_stdout(
+                stdout,
+                cloned_token,
+                cloned_state,
+                cloned_state_sender,
+                show_output,
+            )
+            .await
+            {
+                error!("Error reading from stdout: {}", err);
+            }
+        });
+        let mut pipe_handles = vec![(stdout_token, stdout_handle)];
+        if self.show_output {
+            let stderr = child.stderr.take().unwrap();
+            let stderr_token = CancellationToken::new();
+            let cloned_token = stderr_token.clone();
+            let stderr_handle = tokio::spawn(pipe_stderr(stderr, cloned_token));
+            pipe_handles.push((stderr_token, stderr_handle));
+        }
+        // pipe stdin to child stdin
+        let proc_stdin = child.stdin.take().unwrap();
+        let stdin_token = CancellationToken::new();
+        let cloned_token = stdin_token.clone();
+        let (stdin_tx, stdin_rx) = tokio::sync::mpsc::channel::<String>(3);
+        self.server_stdin_sender = Some(stdin_tx);
+        let stdin_handle = tokio::spawn(async move {
+            if let Err(err) = pipe_stdin(proc_stdin, stdin_rx, cloned_token).await {
+                error!("Error reading from stdin: {}", err);
+            }
+        });
+        pipe_handles.push((stdin_token, stdin_handle));
+        pipe_handles
     }
 
     /// Checks that this servers configured Java version is valid
@@ -760,6 +777,7 @@ async fn pipe_and_monitor_stdout(
     cancellation_token: CancellationToken,
     server_state: Arc<Mutex<MCServerState>>,
     server_state_tx: broadcast::Sender<MCServerState>,
+    show_output: bool,
 ) -> io::Result<()> {
     lazy_static! {
         static ref READY_REGEX: Regex =
@@ -777,8 +795,10 @@ async fn pipe_and_monitor_stdout(
                 if n? == 0 {
                     break;
                 }
-                print!("{}", buf);
-                std::io::stdout().flush()?;
+                if show_output {
+                    print!("{}", buf);
+                    std::io::stdout().flush()?;
+                }
                 let mut current_state_lock = server_state.lock().unwrap();
                 match *current_state_lock {
                     MCServerState::Stopped => error!("Reading IO after server stopped"),
