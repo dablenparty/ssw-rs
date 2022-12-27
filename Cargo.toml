@@ -28,6 +28,7 @@ simplelog = { version = "0.12", features = ["paris", "termcolor"] }
 time = { version = "0.3", features = ["formatting", "macros"] }
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
+toml = "0.5"
 which = "4.3"
 zip = "0.6"
 
