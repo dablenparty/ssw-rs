@@ -25,6 +25,10 @@ pub struct SswConfig {
     pub required_java_version: String,
     /// Extra arguments to pass to the JVM when starting the server
     pub jvm_args: Vec<String>,
+    /// Whether to automatically backup the server on startup
+    pub auto_backup: bool,
+    /// The maximum number of backups to keep
+    pub max_backups: usize,
 }
 
 impl Default for SswConfig {
@@ -37,6 +41,8 @@ impl Default for SswConfig {
             mc_version: None,
             required_java_version: "17.0".to_string(),
             jvm_args: Vec::new(),
+            auto_backup: true,
+            max_backups: 5,
         }
     }
 }
