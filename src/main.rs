@@ -1,5 +1,5 @@
 #![warn(clippy::all, clippy::pedantic)]
-#![allow(clippy::module_name_repetitions, clippy::uninlined_format_args)]
+#![allow(clippy::module_name_repetitions, clippy::format_in_format_args)]
 
 mod config;
 mod log4j;
