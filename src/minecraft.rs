@@ -1,11 +1,13 @@
 use std::{
     collections::HashMap,
+    fs::File,
     io::{self, Write},
     path::{Path, PathBuf},
     process,
     sync::{Arc, Mutex},
 };
 
+use chrono::Utc;
 use lazy_static::lazy_static;
 use log::{debug, error, info, warn};
 use regex::Regex;
@@ -18,6 +20,8 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use toml::Value;
+use walkdir::WalkDir;
+use zip::{write::FileOptions, CompressionMethod, ZipWriter};
 
 use crate::{
     config::{convert_json_to_toml, SswConfig},
@@ -25,7 +29,7 @@ use crate::{
     manifest::load_versions,
     mc_version::{get_required_java_version, try_read_version_from_jar},
     ssw_error,
-    util::{get_java_version, path_to_str},
+    util::{create_dir_if_not_exists, get_java_version, path_to_str},
 };
 
 /// Represents the state of a Minecraft server
@@ -92,10 +96,12 @@ impl MinecraftServer {
                     SswConfig::default()
                 })
         } else {
-            SswConfig::from_path(&config_path).await.unwrap_or_else(|e| {
-                error!("Failed to load SSW config, using default: {}", e);
-                SswConfig::default()
-            })
+            SswConfig::from_path(&config_path)
+                .await
+                .unwrap_or_else(|e| {
+                    error!("Failed to load SSW config, using default: {}", e);
+                    SswConfig::default()
+                })
         };
         let mut inst = Self {
             jar_path,
@@ -284,6 +290,108 @@ impl MinecraftServer {
         self.jar_path.with_file_name(".ssw").join("ssw.toml")
     }
 
+    pub fn get_backup_folder(&self) -> PathBuf {
+        self.jar_path.with_file_name(".ssw").join("backups")
+    }
+
+    /// Makes a backup of the server directory and saves it to the backup folder.
+    /// This will not backup the `libraries`, `logs`, `versions`, or `.ssw` directories.
+    /// The backup is a zip file.
+    fn make_backup(&self) -> ssw_error::Result<()> {
+        const EXCLUDE_GLOBS: &[&str] =
+            &["**/.ssw/*", "**/logs/*", "**/libraries/*", "**/versions/*"];
+        // get all files in the server directory
+        let server_dir = self.jar_path.parent().unwrap();
+        let files = WalkDir::new(server_dir)
+            .into_iter()
+            .filter_entry(|e| {
+                !EXCLUDE_GLOBS.iter().any(|glob| {
+                    let glob = glob::Pattern::new(glob).unwrap();
+                    glob.matches_path(e.path())
+                })
+            })
+            .filter_map(|e| {
+                e.map_or_else(
+                    |e| {
+                        warn!("Failed to read entry: {}", e);
+                        None
+                    },
+                    |e| Some(e.path().to_path_buf()),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let backup_folder = self.get_backup_folder();
+        create_dir_if_not_exists(&backup_folder)?;
+        // check if the backup folder has max backups
+        let max_backups = self.ssw_config.max_backups;
+        if max_backups > 0 {
+            let mut backups = WalkDir::new(&backup_folder)
+                .follow_links(true)
+                .into_iter()
+                .filter_map(|e| {
+                    e.map_or_else(
+                        |e| {
+                            warn!("Failed to read entry: {}", e);
+                            None
+                        },
+                        |e| Some(e.path().to_path_buf()),
+                    )
+                })
+                .collect::<Vec<_>>();
+            backups.sort_by(|a, b| {
+                b.metadata()
+                    .unwrap()
+                    .modified()
+                    .unwrap()
+                    .cmp(&a.metadata().unwrap().modified().unwrap())
+            });
+            if backups.len() > max_backups {
+                for backup in backups.iter().skip(max_backups) {
+                    debug!("Removing old backup: {}", backup.display());
+                    if let Err(e) = std::fs::remove_file(backup) {
+                        warn!("Failed to remove old backup: {}", e);
+                    }
+                }
+            }
+        }
+
+        let backup_name = format!("{}.zip", Utc::now().format("%Y-%m-%d_%H-%M-%S"));
+        let backup_file = backup_folder.join(&backup_name);
+
+        if let Err(e) = {
+            let mut zip = ZipWriter::new(File::create(&backup_file)?);
+            let options = FileOptions::default().compression_method(CompressionMethod::Stored);
+            for file in files {
+                let zip_path = file
+                    .strip_prefix(server_dir)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let file = server_dir.join(&file);
+                if file.is_dir() {
+                    zip.add_directory(zip_path, options)?;
+                } else {
+                    let mut file = File::open(file)?;
+                    zip.start_file(zip_path, options)?;
+                    io::copy(&mut file, &mut zip)?;
+                }
+            }
+            zip.finish()?;
+            Ok::<(), ssw_error::Error>(())
+        } {
+            error!("Failed to create backup: {}", e);
+            // delete the backup file if it was created
+            // this essentially undoes the failed backup
+            if backup_file.exists() {
+                std::fs::remove_file(&backup_file)?;
+            }
+        } else {
+            info!("Created backup: {}", backup_name);
+        }
+        Ok(())
+    }
+
     /// Run the Minecraft server process
     ///
     /// # Errors
@@ -298,10 +406,12 @@ impl MinecraftServer {
         self.check_java_version(&java_executable).await?;
         info!("Loading SSW config...");
         let config_path = self.get_config_path();
-        self.ssw_config = SswConfig::from_path(&config_path).await.unwrap_or_else(|e| {
-            error!("Failed to load SSW config, using default: {}", e);
-            SswConfig::default()
-        });
+        self.ssw_config = SswConfig::from_path(&config_path)
+            .await
+            .unwrap_or_else(|e| {
+                error!("Failed to load SSW config, using default: {}", e);
+                SswConfig::default()
+            });
         info!("SSW config loaded: {:#?}", self.ssw_config);
         self.load_properties().await;
         if let Some(port) = self.get_property("server-port") {
@@ -314,6 +424,14 @@ impl MinecraftServer {
             }
         }
         patch_log4j(self).await?;
+        if self.ssw_config.auto_backup {
+            info!("Auto-backup enabled, backing up server...");
+            if let Err(e) = self.make_backup() {
+                error!("Failed to make backup, continuing: {}", e);
+            } else {
+                info!("Backup complete.");
+            }
+        }
         let memory_in_mb = self.ssw_config.memory_in_gb * 1024.0;
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let memory_arg = format!("-Xmx{}M", memory_in_mb.abs() as u32);
