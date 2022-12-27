@@ -8,6 +8,7 @@ use crate::{ssw_error, util::async_create_dir_if_not_exists};
 // TODO: auto-restart after crash
 /// The SSW server configuration
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(default)]
 pub struct SswConfig {
     /// How much memory to allocate to the server in gigabytes
     pub memory_in_gb: f64,
