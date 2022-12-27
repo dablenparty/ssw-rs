@@ -92,7 +92,7 @@ impl MinecraftServer {
                     SswConfig::default()
                 })
         } else {
-            SswConfig::new(&config_path).await.unwrap_or_else(|e| {
+            SswConfig::from_path(&config_path).await.unwrap_or_else(|e| {
                 error!("Failed to load SSW config, using default: {}", e);
                 SswConfig::default()
             })
@@ -298,7 +298,7 @@ impl MinecraftServer {
         self.check_java_version(&java_executable).await?;
         info!("Loading SSW config...");
         let config_path = self.get_config_path();
-        self.ssw_config = SswConfig::new(&config_path).await.unwrap_or_else(|e| {
+        self.ssw_config = SswConfig::from_path(&config_path).await.unwrap_or_else(|e| {
             error!("Failed to load SSW config, using default: {}", e);
             SswConfig::default()
         });

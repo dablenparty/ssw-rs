@@ -53,7 +53,7 @@ impl SswConfig {
     /// An error may occur when reading or writing the config file, as well as in the serialization/deserialization process.
     ///
     /// returns: `serde_json::Result<SswConfig>`
-    pub async fn new(config_path: &Path) -> ssw_error::Result<Self> {
+    pub async fn from_path(config_path: &Path) -> ssw_error::Result<Self> {
         if config_path.exists() {
             info!("Found existing SSW config");
             let config_string = tokio::fs::read_to_string(config_path).await?;
