@@ -9,7 +9,6 @@ use std::{
 use lazy_static::lazy_static;
 use log::{debug, error, info, warn};
 use regex::Regex;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt},
     process::{ChildStdin, ChildStdout},
@@ -21,11 +20,12 @@ use tokio_util::sync::CancellationToken;
 use toml::Value;
 
 use crate::{
+    config::{convert_json_to_toml, SswConfig},
     log4j::patch_log4j,
     manifest::load_versions,
     mc_version::{get_required_java_version, try_read_version_from_jar},
     ssw_error,
-    util::{async_create_dir_if_not_exists, get_java_version, path_to_str},
+    util::{get_java_version, path_to_str},
 };
 
 /// Represents the state of a Minecraft server
@@ -42,105 +42,6 @@ impl Default for MCServerState {
     fn default() -> Self {
         MCServerState::Stopped
     }
-}
-
-// TODO: auto-restart after crash
-/// The SSW server configuration
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct SswConfig {
-    /// How much memory to allocate to the server in gigabytes
-    pub memory_in_gb: f64,
-    /// How long to wait (in hours) before restarting the server
-    pub restart_timeout: f64,
-    /// How long to wait (in minutes) with no players before shutting
-    /// down the server
-    pub shutdown_timeout: f64,
-    /// The port to use for the SSW proxy
-    pub ssw_port: u16,
-    /// The version string for the associated Minecraft server
-    pub mc_version: Option<String>,
-    /// The required Java version string for the associated Minecraft server
-    pub required_java_version: String,
-    /// Extra arguments to pass to the JVM when starting the server
-    pub jvm_args: Vec<String>,
-}
-
-impl Default for SswConfig {
-    fn default() -> Self {
-        Self {
-            memory_in_gb: 1.0,
-            restart_timeout: 12.0,
-            shutdown_timeout: 5.0,
-            ssw_port: 25566,
-            mc_version: None,
-            required_java_version: "17.0".to_string(),
-            jvm_args: Vec::new(),
-        }
-    }
-}
-
-impl SswConfig {
-    /// Attempt to load a config from the given path
-    ///
-    /// # Arguments
-    ///
-    /// * `config_path` - The path to the config file. If it does not exist, it will be created with default values.
-    ///
-    /// # Errors
-    ///
-    /// An error may occur when reading or writing the config file, as well as in the serialization/deserialization process.
-    ///
-    /// returns: `serde_json::Result<SswConfig>`
-    pub async fn new(config_path: &Path) -> ssw_error::Result<Self> {
-        if config_path.exists() {
-            info!("Found existing SSW config");
-            let config_string = tokio::fs::read_to_string(config_path).await?;
-            toml::from_str(&config_string).map_err(ssw_error::Error::from)
-        } else {
-            info!(
-                "No SSW config found, creating default config at {}",
-                config_path.display()
-            );
-            let config = Self::default();
-            async_create_dir_if_not_exists(
-                &config_path
-                    .parent()
-                    .map_or_else(|| PathBuf::from("."), Path::to_path_buf),
-            )
-            .await?;
-            let config_string = toml::to_string_pretty(&config)?;
-            tokio::fs::write(config_path, config_string).await?;
-            Ok(config)
-        }
-    }
-
-    /// Save the config to the given path
-    ///
-    /// # Arguments
-    ///
-    /// * `config_path` - The path to the config file. If it does not exist, it will be created with default values.
-    ///
-    /// # Errors
-    ///
-    /// An error may occur when writing the config file, as well as in the serialization process.
-    pub async fn save(&self, config_path: &Path) -> ssw_error::Result<()> {
-        let config_string = toml::to_string_pretty(&self)?;
-        tokio::fs::write(config_path, config_string)
-            .await
-            .map_err(ssw_error::Error::from)
-    }
-}
-
-async fn convert_json_to_toml<T: Serialize + DeserializeOwned>(
-    json_path: &Path,
-) -> ssw_error::Result<T> {
-    let json_string = tokio::fs::read_to_string(json_path).await?;
-    let value: T = serde_json::from_str(&json_string)?;
-    let toml_string = toml::to_string_pretty(&value)?;
-    let toml_path = json_path.with_extension("toml");
-    tokio::fs::write(toml_path.clone(), toml_string).await?;
-    tokio::fs::remove_file(json_path).await?;
-    Ok(value)
 }
 
 /// The default port used by Minecraft servers

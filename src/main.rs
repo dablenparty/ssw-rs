@@ -1,6 +1,7 @@
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(clippy::module_name_repetitions, clippy::uninlined_format_args)]
 
+mod config;
 mod log4j;
 mod manifest;
 mod mc_version;
@@ -26,7 +27,7 @@ use duration_string::DurationString;
 use flate2::{Compression, GzBuilder};
 use log::{debug, error, info, warn, LevelFilter};
 use manifest::load_versions;
-use minecraft::{MCServerState, SswConfig};
+use minecraft::MCServerState;
 use proxy::ProxyConfig;
 use simplelog::{
     format_description, ColorChoice, CombinedLogger, TermLogger, TerminalMode, ThreadLogMode,
@@ -554,7 +555,7 @@ fn print_help() {
 ///
 /// returns: `(JoinHandle<()>, CancellationToken, Sender<u16>)`
 fn start_proxy_task(
-    ssw_config: SswConfig,
+    ssw_config: config::SswConfig,
     proxy_ip: String,
     server_state: Arc<Mutex<MCServerState>>,
     server_state_rx: broadcast::Receiver<MCServerState>,
