@@ -401,7 +401,7 @@ impl MinecraftServer {
             error!("Failed to load SSW config, using default: {}", e);
             SswConfig::default()
         });
-        info!("SSW config loaded: {:?}", self.ssw_config);
+        info!("SSW config loaded: {:#?}", self.ssw_config);
         self.load_properties().await;
         if let Some(port) = self.get_property("server-port") {
             if !validate_port(self.ssw_config.ssw_port, port) {
