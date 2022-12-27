@@ -14,6 +14,8 @@ pub enum Error {
     MissingMinecraftVersion,
     ParseIntError(num::ParseIntError),
     ReqwestError(reqwest::Error),
+    TomlDeserializeError(toml::de::Error),
+    TomlSerializeError(toml::ser::Error),
     EnvVarError(env::VarError),
 }
 
@@ -22,18 +24,20 @@ pub type Result<T> = std::result::Result<T, Error>;
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::IoError(e) => write!(f, "IO error: {}", e),
-            Error::ReqwestError(e) => write!(f, "Reqwest error: {}", e),
-            Error::LoggingError(e) => write!(f, "Logging error: {}", e),
             Error::BadJavaVersion(required, actual) => write!(
                 f,
                 "Java version '{}' is less than the required '{}'",
                 actual, required
             ),
+            Error::EnvVarError(e) => write!(f, "Environment variable error: {}", e),
+            Error::IoError(e) => write!(f, "IO error: {}", e),
+            Error::JsonError(e) => write!(f, "JSON error: {}", e),
+            Error::LoggingError(e) => write!(f, "Logging error: {}", e),
             Error::MissingMinecraftVersion => write!(f, "Minecraft version not specified"),
             Error::ParseIntError(e) => write!(f, "Parse error: {}", e),
-            Error::JsonError(e) => write!(f, "JSON error: {}", e),
-            Error::EnvVarError(e) => write!(f, "Environment variable error: {}", e),
+            Error::ReqwestError(e) => write!(f, "Reqwest error: {}", e),
+            Error::TomlDeserializeError(e) => write!(f, "TOML deserialization error: {}", e),
+            Error::TomlSerializeError(e) => write!(f, "TOML serialization error: {}", e),
         }
     }
 }
@@ -67,6 +71,18 @@ impl From<num::ParseIntError> for Error {
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Self {
         Error::JsonError(e)
+    }
+}
+
+impl From<toml::de::Error> for Error {
+    fn from(e: toml::de::Error) -> Self {
+        Error::TomlDeserializeError(e)
+    }
+}
+
+impl From<toml::ser::Error> for Error {
+    fn from(e: toml::ser::Error) -> Self {
+        Error::TomlSerializeError(e)
     }
 }
 

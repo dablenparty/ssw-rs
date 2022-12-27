@@ -9,8 +9,7 @@ use std::{
 use lazy_static::lazy_static;
 use log::{debug, error, info, warn};
 use regex::Regex;
-use serde::{de::Error, Deserialize, Serialize};
-use serde_json::Value;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt},
     process::{ChildStdin, ChildStdout},
@@ -19,6 +18,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
+use toml::Value;
 
 use crate::{
     log4j::patch_log4j,
@@ -91,15 +91,11 @@ impl SswConfig {
     /// An error may occur when reading or writing the config file, as well as in the serialization/deserialization process.
     ///
     /// returns: `serde_json::Result<SswConfig>`
-    pub async fn new(config_path: &Path) -> serde_json::Result<Self> {
+    pub async fn new(config_path: &Path) -> ssw_error::Result<Self> {
         if config_path.exists() {
-            debug!("Found existing SSW config");
-            let config_string = tokio::fs::read_to_string(config_path)
-                .await
-                .map_err(serde_json::Error::custom)?;
-            // TODO: find a way to merge two bad configs
-            //? proc macro for struct -> HashMap
-            serde_json::from_str(&config_string)
+            info!("Found existing SSW config");
+            let config_string = tokio::fs::read_to_string(config_path).await?;
+            toml::from_str(&config_string).map_err(ssw_error::Error::from)
         } else {
             info!(
                 "No SSW config found, creating default config at {}",
@@ -111,12 +107,9 @@ impl SswConfig {
                     .parent()
                     .map_or_else(|| PathBuf::from("."), Path::to_path_buf),
             )
-            .await
-            .map_err(serde_json::Error::custom)?;
-            let config_string = serde_json::to_string_pretty(&config)?;
-            tokio::fs::write(config_path, config_string)
-                .await
-                .map_err(serde_json::Error::custom)?;
+            .await?;
+            let config_string = toml::to_string_pretty(&config)?;
+            tokio::fs::write(config_path, config_string).await?;
             Ok(config)
         }
     }
@@ -130,10 +123,24 @@ impl SswConfig {
     /// # Errors
     ///
     /// An error may occur when writing the config file, as well as in the serialization process.
-    pub async fn save(&self, config_path: &Path) -> io::Result<()> {
-        let config_string = serde_json::to_string_pretty(&self)?;
-        tokio::fs::write(config_path, config_string).await
+    pub async fn save(&self, config_path: &Path) -> ssw_error::Result<()> {
+        let config_string = toml::to_string_pretty(&self)?;
+        tokio::fs::write(config_path, config_string)
+            .await
+            .map_err(ssw_error::Error::from)
     }
+}
+
+async fn convert_json_to_toml<T: Serialize + DeserializeOwned>(
+    json_path: &Path,
+) -> ssw_error::Result<T> {
+    let json_string = tokio::fs::read_to_string(json_path).await?;
+    let value: T = serde_json::from_str(&json_string)?;
+    let toml_string = toml::to_string_pretty(&value)?;
+    let toml_path = json_path.with_extension("toml");
+    tokio::fs::write(toml_path.clone(), toml_string).await?;
+    tokio::fs::remove_file(json_path).await?;
+    Ok(value)
 }
 
 /// The default port used by Minecraft servers
@@ -173,18 +180,29 @@ impl MinecraftServer {
     ///
     /// * `jar_path` - The path to the server jar file
     pub async fn new(jar_path: PathBuf) -> Self {
-        let config_path = jar_path.with_file_name(".ssw").join("ssw.json");
+        let config_path = jar_path.with_file_name(".ssw").join("ssw.toml");
+        let old_config_path = config_path.with_extension("json");
+        let ssw_config = if old_config_path.exists() {
+            info!("Found old SSW config, converting to new format");
+            convert_json_to_toml::<SswConfig>(&old_config_path)
+                .await
+                .unwrap_or_else(|e| {
+                    error!("Failed to convert SSW config, using default: {}", e);
+                    SswConfig::default()
+                })
+        } else {
+            SswConfig::new(&config_path).await.unwrap_or_else(|e| {
+                error!("Failed to load SSW config, using default: {}", e);
+                SswConfig::default()
+            })
+        };
         let mut inst = Self {
             jar_path,
             state: Arc::new(Mutex::new(MCServerState::Stopped)),
             exit_handler: None,
             server_stdin_sender: None,
             server_status_broadcast_channels: broadcast::channel(1),
-            ssw_config: SswConfig::new(&config_path).await.unwrap_or_else(|e| {
-                error!("Failed to load SSW config: {}", e);
-                error!("Using default SSW config");
-                SswConfig::default()
-            }),
+            ssw_config,
             properties: None,
             show_output: true,
         };
@@ -284,7 +302,7 @@ impl MinecraftServer {
     /// # Errors
     ///
     /// An error may occur when writing the config file or in the serialization process.
-    pub async fn save_config(&self) -> io::Result<()> {
+    pub async fn save_config(&self) -> ssw_error::Result<()> {
         let config_path = self.get_config_path();
         self.ssw_config.save(&config_path).await
     }
@@ -362,7 +380,7 @@ impl MinecraftServer {
     ///
     /// This will resolve to `{server_jar_path}/.ssw/ssw.json`
     pub fn get_config_path(&self) -> PathBuf {
-        self.jar_path.with_file_name(".ssw").join("ssw.json")
+        self.jar_path.with_file_name(".ssw").join("ssw.toml")
     }
 
     /// Run the Minecraft server process
@@ -623,7 +641,7 @@ async fn pipe_stderr(mut stderr: tokio::process::ChildStderr, cancel_token: Canc
 /// returns: `bool`
 fn validate_port(ssw_port: u16, server_port_value: &Value) -> bool {
     let mut port_is_valid = true;
-    let server_port: u16 = server_port_value.as_u64().map_or_else(
+    let server_port: u16 = server_port_value.as_integer().map_or_else(
         || {
             debug!("server.properties server-port does not exist");
             DEFAULT_MC_PORT
@@ -667,7 +685,7 @@ fn validate_port(ssw_port: u16, server_port_value: &Value) -> bool {
 /// An error is returned if the file could not be read. One is _not_ returned if the file is not
 /// in the incorrect format. Instead, the properties are returned with only the properties that
 /// were successfully parsed.
-async fn load_properties(path: &Path) -> io::Result<MCServerProperties> {
+async fn load_properties(path: &Path) -> ssw_error::Result<MCServerProperties> {
     let properties_string = tokio::fs::read_to_string(path).await?;
     let new_props = properties_string
         .lines()
@@ -680,10 +698,12 @@ async fn load_properties(path: &Path) -> io::Result<MCServerProperties> {
             let key = split.next()?;
             let value = split
                 .next()
-                .map(|s| s.split('#').next().unwrap_or(""))
-                .map_or_else(|| Ok(Value::Null), serde_json::from_str)
-                .unwrap_or(Value::Null);
-            Some((key.to_string(), value))
+                .map(|s| s.trim().split('#').next())
+                .unwrap_or_default()
+                .map(|s| s.parse::<Value>().ok())
+                .unwrap_or_default();
+
+            value.map(|v| (key.to_string(), v))
         })
         .collect::<MCServerProperties>();
     Ok(new_props)
@@ -704,14 +724,7 @@ async fn load_properties(path: &Path) -> io::Result<MCServerProperties> {
 async fn save_properties(path: &Path, properties: &MCServerProperties) -> io::Result<()> {
     let props_string = properties
         .iter()
-        .map(|(k, v)| {
-            let vs = if v.is_null() {
-                String::new()
-            } else {
-                v.to_string()
-            };
-            format!("{}={}", k, vs)
-        })
+        .map(|(k, v)| format!("{}={}", k, v))
         .collect::<Vec<String>>()
         .join("\n");
     tokio::fs::write(path, props_string).await?;
