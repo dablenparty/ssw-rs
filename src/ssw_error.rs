@@ -8,6 +8,7 @@ pub enum Error {
     /// Raised when the second argument, the actual version string, is lower than the first argument,
     /// the minimum required version string.
     BadJavaVersion(String, String),
+    EnvVarError(env::VarError),
     IoError(io::Error),
     JsonError(serde_json::Error),
     LoggingError(log::SetLoggerError),
@@ -16,7 +17,7 @@ pub enum Error {
     ReqwestError(reqwest::Error),
     TomlDeserializeError(toml::de::Error),
     TomlSerializeError(toml::ser::Error),
-    EnvVarError(env::VarError),
+    ZipError(zip::result::ZipError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -38,6 +39,7 @@ impl fmt::Display for Error {
             Error::ReqwestError(e) => write!(f, "Reqwest error: {}", e),
             Error::TomlDeserializeError(e) => write!(f, "TOML deserialization error: {}", e),
             Error::TomlSerializeError(e) => write!(f, "TOML serialization error: {}", e),
+            Error::ZipError(e) => write!(f, "Zip error: {}", e),
         }
     }
 }
@@ -89,5 +91,11 @@ impl From<toml::ser::Error> for Error {
 impl From<env::VarError> for Error {
     fn from(e: env::VarError) -> Self {
         Error::EnvVarError(e)
+    }
+}
+
+impl From<zip::result::ZipError> for Error {
+    fn from(e: zip::result::ZipError) -> Self {
+        Error::ZipError(e)
     }
 }
