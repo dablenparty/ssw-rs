@@ -1,5 +1,10 @@
 #![warn(clippy::all, clippy::pedantic)]
-#![allow(clippy::module_name_repetitions, clippy::format_in_format_args)]
+// the same thing has different names on windows and unix for some reason
+#![allow(
+    clippy::module_name_repetitions,
+    clippy::format_in_format_args,
+    clippy::uninlined_format_args
+)]
 
 mod config;
 mod log4j;
