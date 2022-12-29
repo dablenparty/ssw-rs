@@ -688,6 +688,12 @@ fn init_logger(level_filter: LevelFilter) -> ssw_error::Result<()> {
         .set_thread_level(LevelFilter::Error)
         .build();
 
+    let file_log_level = if level_filter >= LevelFilter::Debug {
+        LevelFilter::Debug
+    } else {
+        level_filter
+    };
+
     let log_path = zip_logs()?;
     let log_file = std::fs::File::create(log_path)?;
     CombinedLogger::init(vec![
@@ -697,7 +703,7 @@ fn init_logger(level_filter: LevelFilter) -> ssw_error::Result<()> {
             TerminalMode::Mixed,
             ColorChoice::Auto,
         ),
-        WriteLogger::new(level_filter, config, log_file),
+        WriteLogger::new(file_log_level, config, log_file),
     ])?;
     Ok(())
 }
