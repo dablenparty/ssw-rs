@@ -688,7 +688,7 @@ fn init_logger(level_filter: LevelFilter) -> ssw_error::Result<()> {
         .set_thread_level(LevelFilter::Error)
         .build();
 
-    let file_log_level = if level_filter >= LevelFilter::Debug {
+    let file_log_level = if level_filter < LevelFilter::Debug {
         LevelFilter::Debug
     } else {
         level_filter
