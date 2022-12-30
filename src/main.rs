@@ -1,6 +1,12 @@
 #![warn(clippy::all, clippy::pedantic)]
-#![allow(clippy::module_name_repetitions, clippy::uninlined_format_args)]
+// the same thing has different names on windows and unix for some reason
+#![allow(
+    clippy::module_name_repetitions,
+    clippy::format_in_format_args,
+    clippy::uninlined_format_args
+)]
 
+mod config;
 mod log4j;
 mod manifest;
 mod mc_version;
@@ -26,7 +32,7 @@ use duration_string::DurationString;
 use flate2::{Compression, GzBuilder};
 use log::{debug, error, info, warn, LevelFilter};
 use manifest::load_versions;
-use minecraft::{MCServerState, SswConfig};
+use minecraft::MCServerState;
 use proxy::ProxyConfig;
 use simplelog::{
     format_description, ColorChoice, CombinedLogger, TermLogger, TerminalMode, ThreadLogMode,
@@ -383,7 +389,7 @@ async fn send_port_to_proxy(mc_server: &mut MinecraftServer, proxy_tx: &Sender<u
     let port: u16 = mc_server
         .get_property("server-port")
         .map_or(DEFAULT_MC_PORT.into(), |v| {
-            v.as_u64().unwrap_or_else(|| DEFAULT_MC_PORT.into())
+            v.as_integer().unwrap_or_else(|| DEFAULT_MC_PORT.into())
         })
         .try_into()
         .unwrap_or_else(|_| {
@@ -435,7 +441,7 @@ async fn get_or_set_ssw_port(
 async fn get_or_set_mc_version(
     command_with_args: &[&str],
     mc_server: &mut MinecraftServer,
-) -> io::Result<()> {
+) -> ssw_error::Result<()> {
     if command_with_args.len() == 1 {
         println!(
             "Minecraft version: {}",
@@ -481,7 +487,7 @@ async fn get_or_set_mc_port(
 ) -> ssw_error::Result<()> {
     if let Some(arg) = command_with_args.get(1) {
         let _: u16 = arg.parse()?;
-        mc_server.set_property("server-port".to_string(), serde_json::from_str(arg)?);
+        mc_server.set_property("server-port".to_string(), toml::from_str(arg)?);
         if let Err(e) = mc_server.save_properties().await {
             if e.kind() == io::ErrorKind::NotFound {
                 warn!("Failed to save properties: {}", e);
@@ -498,7 +504,7 @@ async fn get_or_set_mc_port(
         let port = mc_server
             .get_property("server-port")
             .map_or(DEFAULT_MC_PORT.into(), |v| {
-                v.as_u64().unwrap_or_else(|| DEFAULT_MC_PORT.into())
+                v.as_integer().unwrap_or_else(|| DEFAULT_MC_PORT.into())
             });
         info!("Current MC port: {}", port);
     }
@@ -554,7 +560,7 @@ fn print_help() {
 ///
 /// returns: `(JoinHandle<()>, CancellationToken, Sender<u16>)`
 fn start_proxy_task(
-    ssw_config: SswConfig,
+    ssw_config: config::SswConfig,
     proxy_ip: String,
     server_state: Arc<Mutex<MCServerState>>,
     server_state_rx: broadcast::Receiver<MCServerState>,
@@ -682,6 +688,12 @@ fn init_logger(level_filter: LevelFilter) -> ssw_error::Result<()> {
         .set_thread_level(LevelFilter::Error)
         .build();
 
+    let file_log_level = if level_filter < LevelFilter::Debug {
+        LevelFilter::Debug
+    } else {
+        level_filter
+    };
+
     let log_path = zip_logs()?;
     let log_file = std::fs::File::create(log_path)?;
     CombinedLogger::init(vec![
@@ -691,7 +703,7 @@ fn init_logger(level_filter: LevelFilter) -> ssw_error::Result<()> {
             TerminalMode::Mixed,
             ColorChoice::Auto,
         ),
-        WriteLogger::new(level_filter, config, log_file),
+        WriteLogger::new(file_log_level, config, log_file),
     ])?;
     Ok(())
 }

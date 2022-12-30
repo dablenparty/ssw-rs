@@ -1,16 +1,16 @@
 use std::{
     collections::HashMap,
+    fs::File,
     io::{self, Write},
     path::{Path, PathBuf},
     process,
     sync::{Arc, Mutex},
 };
 
+use chrono::Utc;
 use lazy_static::lazy_static;
 use log::{debug, error, info, warn};
 use regex::Regex;
-use serde::{de::Error, Deserialize, Serialize};
-use serde_json::Value;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt},
     process::{ChildStdin, ChildStdout},
@@ -19,13 +19,17 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
+use toml::Value;
+use walkdir::WalkDir;
+use zip::{write::FileOptions, CompressionMethod, ZipWriter};
 
 use crate::{
+    config::{convert_json_to_toml, SswConfig},
     log4j::patch_log4j,
     manifest::load_versions,
     mc_version::{get_required_java_version, try_read_version_from_jar},
     ssw_error,
-    util::{async_create_dir_if_not_exists, get_java_version, path_to_str},
+    util::{create_dir_if_not_exists, get_java_version, path_to_str},
 };
 
 /// Represents the state of a Minecraft server
@@ -41,98 +45,6 @@ pub enum MCServerState {
 impl Default for MCServerState {
     fn default() -> Self {
         MCServerState::Stopped
-    }
-}
-
-// TODO: auto-restart after crash
-/// The SSW server configuration
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct SswConfig {
-    /// How much memory to allocate to the server in gigabytes
-    pub memory_in_gb: f64,
-    /// How long to wait (in hours) before restarting the server
-    pub restart_timeout: f64,
-    /// How long to wait (in minutes) with no players before shutting
-    /// down the server
-    pub shutdown_timeout: f64,
-    /// The port to use for the SSW proxy
-    pub ssw_port: u16,
-    /// The version string for the associated Minecraft server
-    pub mc_version: Option<String>,
-    /// The required Java version string for the associated Minecraft server
-    pub required_java_version: String,
-    /// Extra arguments to pass to the JVM when starting the server
-    pub jvm_args: Vec<String>,
-}
-
-impl Default for SswConfig {
-    fn default() -> Self {
-        Self {
-            memory_in_gb: 1.0,
-            restart_timeout: 12.0,
-            shutdown_timeout: 5.0,
-            ssw_port: 25566,
-            mc_version: None,
-            required_java_version: "17.0".to_string(),
-            jvm_args: Vec::new(),
-        }
-    }
-}
-
-impl SswConfig {
-    /// Attempt to load a config from the given path
-    ///
-    /// # Arguments
-    ///
-    /// * `config_path` - The path to the config file. If it does not exist, it will be created with default values.
-    ///
-    /// # Errors
-    ///
-    /// An error may occur when reading or writing the config file, as well as in the serialization/deserialization process.
-    ///
-    /// returns: `serde_json::Result<SswConfig>`
-    pub async fn new(config_path: &Path) -> serde_json::Result<Self> {
-        if config_path.exists() {
-            debug!("Found existing SSW config");
-            let config_string = tokio::fs::read_to_string(config_path)
-                .await
-                .map_err(serde_json::Error::custom)?;
-            // TODO: find a way to merge two bad configs
-            //? proc macro for struct -> HashMap
-            serde_json::from_str(&config_string)
-        } else {
-            info!(
-                "No SSW config found, creating default config at {}",
-                config_path.display()
-            );
-            let config = Self::default();
-            async_create_dir_if_not_exists(
-                &config_path
-                    .parent()
-                    .map_or_else(|| PathBuf::from("."), Path::to_path_buf),
-            )
-            .await
-            .map_err(serde_json::Error::custom)?;
-            let config_string = serde_json::to_string_pretty(&config)?;
-            tokio::fs::write(config_path, config_string)
-                .await
-                .map_err(serde_json::Error::custom)?;
-            Ok(config)
-        }
-    }
-
-    /// Save the config to the given path
-    ///
-    /// # Arguments
-    ///
-    /// * `config_path` - The path to the config file. If it does not exist, it will be created with default values.
-    ///
-    /// # Errors
-    ///
-    /// An error may occur when writing the config file, as well as in the serialization process.
-    pub async fn save(&self, config_path: &Path) -> io::Result<()> {
-        let config_string = serde_json::to_string_pretty(&self)?;
-        tokio::fs::write(config_path, config_string).await
     }
 }
 
@@ -173,18 +85,31 @@ impl MinecraftServer {
     ///
     /// * `jar_path` - The path to the server jar file
     pub async fn new(jar_path: PathBuf) -> Self {
-        let config_path = jar_path.with_file_name(".ssw").join("ssw.json");
+        let config_path = jar_path.with_file_name(".ssw").join("ssw.toml");
+        let old_config_path = config_path.with_extension("json");
+        let ssw_config = if old_config_path.exists() {
+            info!("Found old SSW config, converting to new format");
+            convert_json_to_toml::<SswConfig>(&old_config_path)
+                .await
+                .unwrap_or_else(|e| {
+                    error!("Failed to convert SSW config, using default: {}", e);
+                    SswConfig::default()
+                })
+        } else {
+            SswConfig::from_path(&config_path)
+                .await
+                .unwrap_or_else(|e| {
+                    error!("Failed to load SSW config, using default: {}", e);
+                    SswConfig::default()
+                })
+        };
         let mut inst = Self {
             jar_path,
             state: Arc::new(Mutex::new(MCServerState::Stopped)),
             exit_handler: None,
             server_stdin_sender: None,
             server_status_broadcast_channels: broadcast::channel(1),
-            ssw_config: SswConfig::new(&config_path).await.unwrap_or_else(|e| {
-                error!("Failed to load SSW config: {}", e);
-                error!("Using default SSW config");
-                SswConfig::default()
-            }),
+            ssw_config,
             properties: None,
             show_output: true,
         };
@@ -284,7 +209,7 @@ impl MinecraftServer {
     /// # Errors
     ///
     /// An error may occur when writing the config file or in the serialization process.
-    pub async fn save_config(&self) -> io::Result<()> {
+    pub async fn save_config(&self) -> ssw_error::Result<()> {
         let config_path = self.get_config_path();
         self.ssw_config.save(&config_path).await
     }
@@ -362,7 +287,109 @@ impl MinecraftServer {
     ///
     /// This will resolve to `{server_jar_path}/.ssw/ssw.json`
     pub fn get_config_path(&self) -> PathBuf {
-        self.jar_path.with_file_name(".ssw").join("ssw.json")
+        self.jar_path.with_file_name(".ssw").join("ssw.toml")
+    }
+
+    pub fn get_backup_folder(&self) -> PathBuf {
+        self.jar_path.with_file_name(".ssw").join("backups")
+    }
+
+    /// Makes a backup of the server directory and saves it to the backup folder.
+    /// This will not backup the `libraries`, `logs`, `versions`, or `.ssw` directories.
+    /// The backup is a zip file.
+    fn make_backup(&self) -> ssw_error::Result<()> {
+        const EXCLUDE_GLOBS: &[&str] =
+            &["**/.ssw/*", "**/logs/*", "**/libraries/*", "**/versions/*"];
+        // get all files in the server directory
+        let server_dir = self.jar_path.parent().unwrap();
+        let files = WalkDir::new(server_dir)
+            .into_iter()
+            .filter_entry(|e| {
+                !EXCLUDE_GLOBS.iter().any(|glob| {
+                    let glob = glob::Pattern::new(glob).unwrap();
+                    glob.matches_path(e.path())
+                })
+            })
+            .filter_map(|e| {
+                e.map_or_else(
+                    |e| {
+                        warn!("Failed to read entry: {}", e);
+                        None
+                    },
+                    |e| Some(e.path().to_path_buf()),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let backup_folder = self.get_backup_folder();
+        create_dir_if_not_exists(&backup_folder)?;
+        // check if the backup folder has max backups
+        let max_backups = self.ssw_config.max_backups;
+        if max_backups > 0 {
+            let mut backups = WalkDir::new(&backup_folder)
+                .follow_links(true)
+                .into_iter()
+                .filter_map(|e| {
+                    e.map_or_else(
+                        |e| {
+                            warn!("Failed to read entry: {}", e);
+                            None
+                        },
+                        |e| Some(e.path().to_path_buf()),
+                    )
+                })
+                .collect::<Vec<_>>();
+            backups.sort_by(|a, b| {
+                b.metadata()
+                    .unwrap()
+                    .modified()
+                    .unwrap()
+                    .cmp(&a.metadata().unwrap().modified().unwrap())
+            });
+            if backups.len() > max_backups {
+                for backup in backups.iter().skip(max_backups) {
+                    debug!("Removing old backup: {}", backup.display());
+                    if let Err(e) = std::fs::remove_file(backup) {
+                        warn!("Failed to remove old backup: {}", e);
+                    }
+                }
+            }
+        }
+
+        let backup_name = format!("{}.zip", Utc::now().format("%Y-%m-%d_%H-%M-%S"));
+        let backup_file = backup_folder.join(&backup_name);
+
+        if let Err(e) = {
+            let mut zip = ZipWriter::new(File::create(&backup_file)?);
+            let options = FileOptions::default().compression_method(CompressionMethod::Stored);
+            for file in files {
+                let zip_path = file
+                    .strip_prefix(server_dir)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let file = server_dir.join(&file);
+                if file.is_dir() {
+                    zip.add_directory(zip_path, options)?;
+                } else {
+                    let mut file = File::open(file)?;
+                    zip.start_file(zip_path, options)?;
+                    io::copy(&mut file, &mut zip)?;
+                }
+            }
+            zip.finish()?;
+            Ok::<(), ssw_error::Error>(())
+        } {
+            error!("Failed to create backup: {}", e);
+            // delete the backup file if it was created
+            // this essentially undoes the failed backup
+            if backup_file.exists() {
+                std::fs::remove_file(&backup_file)?;
+            }
+        } else {
+            info!("Created backup: {}", backup_name);
+        }
+        Ok(())
     }
 
     /// Run the Minecraft server process
@@ -379,11 +406,13 @@ impl MinecraftServer {
         self.check_java_version(&java_executable).await?;
         info!("Loading SSW config...");
         let config_path = self.get_config_path();
-        self.ssw_config = SswConfig::new(&config_path).await.unwrap_or_else(|e| {
-            error!("Failed to load SSW config, using default: {}", e);
-            SswConfig::default()
-        });
-        info!("SSW config loaded: {:?}", self.ssw_config);
+        self.ssw_config = SswConfig::from_path(&config_path)
+            .await
+            .unwrap_or_else(|e| {
+                error!("Failed to load SSW config, using default: {}", e);
+                SswConfig::default()
+            });
+        info!("SSW config loaded: {:#?}", self.ssw_config);
         self.load_properties().await;
         if let Some(port) = self.get_property("server-port") {
             if !validate_port(self.ssw_config.ssw_port, port) {
@@ -395,6 +424,14 @@ impl MinecraftServer {
             }
         }
         patch_log4j(self).await?;
+        if self.ssw_config.auto_backup {
+            info!("Auto-backup enabled, backing up server...");
+            if let Err(e) = self.make_backup() {
+                error!("Failed to make backup, continuing: {}", e);
+            } else {
+                info!("Backup complete.");
+            }
+        }
         let memory_in_mb = self.ssw_config.memory_in_gb * 1024.0;
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let memory_arg = format!("-Xmx{}M", memory_in_mb.abs() as u32);
@@ -623,7 +660,7 @@ async fn pipe_stderr(mut stderr: tokio::process::ChildStderr, cancel_token: Canc
 /// returns: `bool`
 fn validate_port(ssw_port: u16, server_port_value: &Value) -> bool {
     let mut port_is_valid = true;
-    let server_port: u16 = server_port_value.as_u64().map_or_else(
+    let server_port: u16 = server_port_value.as_integer().map_or_else(
         || {
             debug!("server.properties server-port does not exist");
             DEFAULT_MC_PORT
@@ -667,7 +704,7 @@ fn validate_port(ssw_port: u16, server_port_value: &Value) -> bool {
 /// An error is returned if the file could not be read. One is _not_ returned if the file is not
 /// in the incorrect format. Instead, the properties are returned with only the properties that
 /// were successfully parsed.
-async fn load_properties(path: &Path) -> io::Result<MCServerProperties> {
+async fn load_properties(path: &Path) -> ssw_error::Result<MCServerProperties> {
     let properties_string = tokio::fs::read_to_string(path).await?;
     let new_props = properties_string
         .lines()
@@ -680,10 +717,12 @@ async fn load_properties(path: &Path) -> io::Result<MCServerProperties> {
             let key = split.next()?;
             let value = split
                 .next()
-                .map(|s| s.split('#').next().unwrap_or(""))
-                .map_or_else(|| Ok(Value::Null), serde_json::from_str)
-                .unwrap_or(Value::Null);
-            Some((key.to_string(), value))
+                .map(|s| s.trim().split('#').next())
+                .unwrap_or_default()
+                .map(|s| s.parse::<Value>().ok())
+                .unwrap_or_default();
+
+            value.map(|v| (key.to_string(), v))
         })
         .collect::<MCServerProperties>();
     Ok(new_props)
@@ -704,14 +743,7 @@ async fn load_properties(path: &Path) -> io::Result<MCServerProperties> {
 async fn save_properties(path: &Path, properties: &MCServerProperties) -> io::Result<()> {
     let props_string = properties
         .iter()
-        .map(|(k, v)| {
-            let vs = if v.is_null() {
-                String::new()
-            } else {
-                v.to_string()
-            };
-            format!("{}={}", k, vs)
-        })
+        .map(|(k, v)| format!("{}={}", k, v))
         .collect::<Vec<String>>()
         .join("\n");
     tokio::fs::write(path, props_string).await?;

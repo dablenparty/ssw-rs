@@ -16,7 +16,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::minecraft::{MCServerState, SswConfig, DEFAULT_MC_PORT};
+use crate::minecraft::{MCServerState, DEFAULT_MC_PORT};
 use crate::SswEvent;
 
 enum ConnectionManagerEvent {
@@ -34,7 +34,7 @@ pub struct ProxyConfig {
     /// IP address to listen on (without port).
     pub ip: String,
     /// SSW config to use.
-    pub ssw_config: SswConfig,
+    pub ssw_config: crate::config::SswConfig,
     /// Thread-safe mutex around the Minecraft server state.
     pub server_state: Arc<Mutex<MCServerState>>,
     /// Sender to send events to the main thread.
