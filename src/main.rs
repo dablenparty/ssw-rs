@@ -389,7 +389,7 @@ async fn send_port_to_proxy(mc_server: &mut MinecraftServer, proxy_tx: &Sender<u
     let port: u16 = mc_server
         .get_property("server-port")
         .map_or(DEFAULT_MC_PORT.into(), |v| {
-            v.as_integer().unwrap_or_else(|| DEFAULT_MC_PORT.into())
+            v.as_u64().unwrap_or_else(|| DEFAULT_MC_PORT.into())
         })
         .try_into()
         .unwrap_or_else(|_| {
@@ -487,7 +487,7 @@ async fn get_or_set_mc_port(
 ) -> ssw_error::Result<()> {
     if let Some(arg) = command_with_args.get(1) {
         let _: u16 = arg.parse()?;
-        mc_server.set_property("server-port".to_string(), toml::from_str(arg)?);
+        mc_server.set_property("server-port".to_string(), serde_json::from_str(arg)?);
         if let Err(e) = mc_server.save_properties().await {
             if e.kind() == io::ErrorKind::NotFound {
                 warn!("Failed to save properties: {}", e);
@@ -504,7 +504,7 @@ async fn get_or_set_mc_port(
         let port = mc_server
             .get_property("server-port")
             .map_or(DEFAULT_MC_PORT.into(), |v| {
-                v.as_integer().unwrap_or_else(|| DEFAULT_MC_PORT.into())
+                v.as_u64().unwrap_or_else(|| DEFAULT_MC_PORT.into())
             });
         info!("Current MC port: {}", port);
     }

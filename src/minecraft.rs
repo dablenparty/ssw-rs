@@ -11,6 +11,7 @@ use chrono::Utc;
 use lazy_static::lazy_static;
 use log::{debug, error, info, warn};
 use regex::Regex;
+use serde_json::Value;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt},
     process::{ChildStdin, ChildStdout},
@@ -19,7 +20,6 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
-use toml::Value;
 use walkdir::WalkDir;
 use zip::{write::FileOptions, CompressionMethod, ZipWriter};
 
@@ -660,7 +660,7 @@ async fn pipe_stderr(mut stderr: tokio::process::ChildStderr, cancel_token: Canc
 /// returns: `bool`
 fn validate_port(ssw_port: u16, server_port_value: &Value) -> bool {
     let mut port_is_valid = true;
-    let server_port: u16 = server_port_value.as_integer().map_or_else(
+    let server_port: u16 = server_port_value.as_u64().map_or_else(
         || {
             debug!("server.properties server-port does not exist");
             DEFAULT_MC_PORT
@@ -717,12 +717,10 @@ async fn load_properties(path: &Path) -> ssw_error::Result<MCServerProperties> {
             let key = split.next()?;
             let value = split
                 .next()
-                .map(|s| s.trim().split('#').next())
-                .unwrap_or_default()
-                .map(|s| s.parse::<Value>().ok())
+                .map(|s| s.split('#').next().unwrap_or(""))
+                .map_or_else(|| Ok(Value::Null), serde_json::from_str)
                 .unwrap_or_default();
-
-            value.map(|v| (key.to_string(), v))
+            Some((key.to_string(), value))
         })
         .collect::<MCServerProperties>();
     Ok(new_props)
@@ -743,7 +741,14 @@ async fn load_properties(path: &Path) -> ssw_error::Result<MCServerProperties> {
 async fn save_properties(path: &Path, properties: &MCServerProperties) -> io::Result<()> {
     let props_string = properties
         .iter()
-        .map(|(k, v)| format!("{}={}", k, v))
+        .map(|(k, v)| {
+            let vs = if v.is_null() {
+                String::new()
+            } else {
+                v.to_string()
+            };
+            format!("{}={}", k, vs)
+        })
         .collect::<Vec<String>>()
         .join("\n");
     tokio::fs::write(path, props_string).await?;
