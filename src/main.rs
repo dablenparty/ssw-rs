@@ -27,7 +27,7 @@ use crate::{
     minecraft::{MinecraftServer, DEFAULT_MC_PORT},
 };
 use chrono::{DateTime, Local};
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use duration_string::DurationString;
 use flate2::{Compression, GzBuilder};
 use log::{debug, error, info, warn, LevelFilter};
@@ -60,22 +60,11 @@ pub enum SswEvent {
     ForceStartup(String),
 }
 
-/// Simple Server Wrapper (SSW) is a simple wrapper for Minecraft servers, allowing for easy
-/// automation of some simple server management features.
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct CommandLineArgs {
+#[derive(Debug, Args)]
+struct StartArgs {
     /// The path to the Minecraft server JAR file.
     #[arg(required = true)]
     server_jar: PathBuf,
-
-    /// The log level to use.
-    #[arg(short, long, value_parser, default_value_t = LevelFilter::Info)]
-    log_level: LevelFilter,
-
-    /// Refreshes the Minecraft version manifest.
-    #[arg(short, long)]
-    refresh_manifest: bool,
 
     /// Binds the proxy to the specific address.
     #[arg(short, long, value_parser, default_value_t = String::from("0.0.0.0"))]
@@ -85,6 +74,32 @@ struct CommandLineArgs {
     /// console, not the log file. That is managed by the server itself, and not SSW.
     #[arg(short, long)]
     no_mc_output: bool,
+}
+
+#[repr(u8)]
+#[derive(Debug, Subcommand)]
+enum CommandLineCommands {
+    /// Starts a Minecraft server.
+    Start(StartArgs) = 0,
+}
+
+/// Simple Server Wrapper (SSW) is a simple wrapper for Minecraft servers, allowing for easy
+/// automation of some simple server management features.
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+#[command(propagate_version = true)]
+struct CommandLineArgs {
+    /// The SSW sub command to run.
+    #[command(subcommand)]
+    subcommand: CommandLineCommands,
+
+    /// The log level to use.
+    #[arg(short, long, value_parser, default_value_t = LevelFilter::Info)]
+    log_level: LevelFilter,
+
+    /// Refreshes the Minecraft version manifest.
+    #[arg(short, long)]
+    refresh_manifest: bool,
 }
 
 const EXIT_COMMAND: &str = "exit";
@@ -107,9 +122,16 @@ async fn main() -> io::Result<()> {
             info!("Successfully refreshed Minecraft server manifest.");
         }
     }
+    match args.subcommand {
+        CommandLineCommands::Start(args) => start_main(args).await?,
+    }
+    Ok(())
+}
+
+async fn start_main(args: StartArgs) -> io::Result<()> {
     let mut mc_server = MinecraftServer::new(dunce::canonicalize(args.server_jar)?).await;
     mc_server.show_output = !args.no_mc_output;
-    if mc_server.ssw_config.mc_version.is_none() || args.refresh_manifest {
+    if mc_server.ssw_config.mc_version.is_none() {
         if let Err(e) = mc_server.load_version().await {
             error!("failed to load version: {}", e);
         }
