@@ -25,7 +25,7 @@ use std::{
 
 use crate::{
     commandline::CommandLineArgs,
-    manifest::refresh_manifest,
+    manifest::{refresh_manifest, VersionManifestV2},
     minecraft::{MinecraftServer, DEFAULT_MC_PORT},
 };
 use chrono::{DateTime, Local};
@@ -33,7 +33,6 @@ use clap::Parser;
 use duration_string::DurationString;
 use flate2::{Compression, GzBuilder};
 use log::{debug, error, info, warn, LevelFilter};
-use manifest::load_versions;
 use minecraft::MCServerState;
 use proxy::ProxyConfig;
 use simplelog::{
@@ -409,8 +408,8 @@ async fn get_or_set_mc_version(
         );
     } else {
         let version = command_with_args[1];
-        let all_versions = load_versions().await?;
-        let _ = all_versions
+        let manifest = VersionManifestV2::load().await?;
+        let _ = manifest.versions()
             .iter()
             .find(|v| v.id == version)
             .ok_or_else(|| {

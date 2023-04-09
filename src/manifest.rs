@@ -26,6 +26,20 @@ pub struct VersionManifestV2 {
     latest: LatestVersions,
 }
 
+impl VersionManifestV2 {
+    /// Loads the launcher manifest from disk.
+    pub async fn load() -> io::Result<Self> {
+        let manifest_location = get_manifest_location();
+        debug!(
+            "Loading version manifest from {}",
+            manifest_location.display()
+        );
+        let manifest = tokio::fs::read_to_string(manifest_location).await?;
+        let manifest: VersionManifestV2 = serde_json::from_str(&manifest)?; // I could inline this, but ? implicitly converts the error to an io::Error
+        Ok(manifest)
+    }
+}
+
 /// Gets the location to the launcher manifest.
 ///
 /// - Windows: `%APPDATA%/.minecraft/versions/version_manifest_v2.json`
@@ -83,20 +97,4 @@ pub async fn refresh_manifest() -> ssw_error::Result<()> {
     debug!("Saving new manifest to {}", manifest_location.display());
     tokio::fs::write(manifest_location, manifest).await?;
     Ok(())
-}
-
-/// Loads the launcher manifest from the local file system.
-///
-/// # Errors
-///
-/// An error will be returned if the manifest fails to load or parse.
-pub async fn load_versions() -> io::Result<Vec<MinecraftVersion>> {
-    let manifest_location = get_manifest_location();
-    debug!(
-        "Loading version manifest from {}",
-        manifest_location.display()
-    );
-    let manifest = tokio::fs::read_to_string(manifest_location).await?;
-    let manifest: VersionManifestV2 = serde_json::from_str(&manifest)?;
-    Ok(manifest.versions)
 }
