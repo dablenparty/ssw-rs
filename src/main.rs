@@ -6,6 +6,7 @@
     clippy::uninlined_format_args
 )]
 
+mod commandline;
 mod config;
 mod log4j;
 mod manifest;
@@ -23,11 +24,12 @@ use std::{
 };
 
 use crate::{
+    commandline::CommandLineArgs,
     manifest::refresh_manifest,
     minecraft::{MinecraftServer, DEFAULT_MC_PORT},
 };
 use chrono::{DateTime, Local};
-use clap::{Args, Parser, Subcommand};
+use clap::Parser;
 use duration_string::DurationString;
 use flate2::{Compression, GzBuilder};
 use log::{debug, error, info, warn, LevelFilter};
@@ -60,61 +62,19 @@ pub enum SswEvent {
     ForceStartup(String),
 }
 
-#[derive(Debug, Args)]
-struct StartArgs {
-    /// The path to the Minecraft server JAR file.
-    #[arg(required = true)]
-    server_jar: PathBuf,
-
-    /// Binds the proxy to the specific address.
-    #[arg(short, long, value_parser, default_value_t = String::from("0.0.0.0"))]
-    proxy_ip: String,
-
-    /// Disables output from the Minecraft server. This only affects the output that is sent to the
-    /// console, not the log file. That is managed by the server itself, and not SSW.
-    #[arg(short, long)]
-    no_mc_output: bool,
-}
-
-#[repr(u8)]
-#[derive(Debug, Subcommand)]
-enum CommandLineCommands {
-    /// Starts a Minecraft server.
-    Start(StartArgs) = 0,
-}
-
-/// Simple Server Wrapper (SSW) is a simple wrapper for Minecraft servers, allowing for easy
-/// automation of some simple server management features.
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-#[command(propagate_version = true)]
-struct CommandLineArgs {
-    /// The SSW sub command to run.
-    #[command(subcommand)]
-    subcommand: CommandLineCommands,
-
-    /// The log level to use.
-    #[arg(short, long, value_parser, default_value_t = LevelFilter::Info)]
-    log_level: LevelFilter,
-
-    /// Refreshes the Minecraft version manifest.
-    #[arg(short, long)]
-    refresh_manifest: bool,
-}
-
 const EXIT_COMMAND: &str = "exit";
 
 #[tokio::main]
-async fn main() -> io::Result<()> {
+async fn main() -> ssw_error::Result<()> {
     let args = CommandLineArgs::parse();
-    if let Err(e) = init_logger(args.log_level) {
+    if let Err(e) = init_logger(args.log_level()) {
         error!("failed to initialize logger: {:?}", e);
         std::process::exit(1);
     }
     debug!("Parsed args: {:#?}", args);
     let cargo_version = env!("CARGO_PKG_VERSION");
     println!("SSW Console v{}", cargo_version);
-    if args.refresh_manifest {
+    if args.refresh_manifest() {
         info!("Refreshing Minecraft server manifest...");
         if let Err(e) = refresh_manifest().await {
             error!("failed to refresh manifest: {:?}", e);
@@ -122,39 +82,7 @@ async fn main() -> io::Result<()> {
             info!("Successfully refreshed Minecraft server manifest.");
         }
     }
-    match args.subcommand {
-        CommandLineCommands::Start(args) => start_main(args).await?,
-    }
-    Ok(())
-}
-
-async fn start_main(args: StartArgs) -> io::Result<()> {
-    let mut mc_server = MinecraftServer::new(dunce::canonicalize(args.server_jar)?).await;
-    mc_server.show_output = !args.no_mc_output;
-    if mc_server.ssw_config.mc_version.is_none() {
-        if let Err(e) = mc_server.load_version().await {
-            error!("failed to load version: {}", e);
-        }
-    }
-    let (event_tx, event_rx) = tokio::sync::mpsc::channel::<SswEvent>(100);
-    let (proxy_handle, proxy_cancel_token, proxy_tx) = start_proxy_task(
-        mc_server.ssw_config.clone(),
-        args.proxy_ip,
-        mc_server.status(),
-        mc_server.subscribe_to_state_changes(),
-        event_tx.clone(),
-    );
-    //? separate cancel token
-    let stdin_handle = start_stdin_task(event_tx.clone(), proxy_cancel_token.clone());
-    run_ssw_event_loop(
-        &mut mc_server,
-        proxy_cancel_token,
-        (event_tx, event_rx),
-        proxy_tx,
-    )
-    .await;
-    stdin_handle.await?;
-    proxy_handle.await?;
+    args.subcommand().run().await?;
     Ok(())
 }
 
