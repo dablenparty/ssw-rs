@@ -82,8 +82,14 @@ async fn main() -> ssw_error::Result<()> {
             info!("Successfully refreshed Minecraft server manifest.");
         }
     }
-    args.subcommand().run().await?;
-    Ok(())
+    let subcommand = args.subcommand();
+    if let Err(err) = subcommand.run().await {
+        error!("Error running command: {:?}", err);
+        // log the error, but also return it for the caller
+        Err(err)
+    } else {
+        Ok(())
+    }
 }
 
 /// Runs the main event loop for SSW. This loop handles all events that are sent to the event channel.
