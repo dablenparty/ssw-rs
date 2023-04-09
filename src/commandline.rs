@@ -4,21 +4,24 @@ use log::LevelFilter;
 
 use crate::ssw_error;
 
-use self::start::{start_main, StartArgs};
+use self::{start::{start_main, StartArgs}, new::{NewArgs, new_main}};
 
+pub mod new;
 pub mod start;
 
 #[repr(u8)]
 #[derive(Debug, Subcommand)]
 pub enum CommandLineCommands {
     /// Starts a Minecraft server.
-    Start(StartArgs) = 0,
+    Start(StartArgs),
+    New(NewArgs)
 }
 
 impl CommandLineCommands {
     pub async fn run(self) -> ssw_error::Result<()> {
         match self {
             CommandLineCommands::Start(args) => start_main(args).await?,
+            CommandLineCommands::New(args) => new_main(args).await?,
         }
         Ok(())
     }
