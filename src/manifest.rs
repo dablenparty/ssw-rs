@@ -1,5 +1,6 @@
 use std::{io, path::PathBuf};
 
+use getset::Getters;
 use log::debug;
 use serde::Deserialize;
 
@@ -7,13 +8,22 @@ use crate::{mc_version::MinecraftVersion, ssw_error, util::async_create_dir_if_n
 
 const MANIFEST_V2_LINK: &str = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
 
+#[derive(Deserialize, Debug, Clone, Getters)]
+#[get = "pub"]
+pub struct LatestVersions {
+    release: String,
+    snapshot: String,
+}
+
 /// The manifest of all Minecraft versions.
 ///
 /// This struct is not a complete representation of the manifest, but only the parts that are needed.
-#[derive(Deserialize)]
-struct VersionManifestV2 {
+#[derive(Deserialize, Debug, Getters)]
+#[get = "pub"]
+pub struct VersionManifestV2 {
     /// The complete list of all Minecraft versions.
     versions: Vec<MinecraftVersion>,
+    latest: LatestVersions,
 }
 
 /// Gets the location to the launcher manifest.
