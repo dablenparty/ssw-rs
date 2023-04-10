@@ -82,7 +82,8 @@ async fn main() -> ssw_error::Result<()> {
     }
     let subcommand = args.subcommand();
     if let Err(err) = subcommand.run().await {
-        error!("Error running command: {:?}", err);
+        error!("Error running command: {}", err);
+        debug!("{:?}", err);
         // log the error, but also return it for the caller
         Err(err)
     } else {
