@@ -38,6 +38,11 @@ impl VersionManifestV2 {
         let manifest: VersionManifestV2 = serde_json::from_str(&manifest)?; // I could inline this, but ? implicitly converts the error to an io::Error
         Ok(manifest)
     }
+
+    /// Finds a Minecraft version by its ID, e.g. `1.17.1`, if it exists.
+    pub fn find_version(&self, id: &str) -> Option<&MinecraftVersion> {
+        self.versions.iter().find(|v| v.id == id)
+    }
 }
 
 /// Gets the location to the launcher manifest.
