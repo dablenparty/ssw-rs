@@ -91,7 +91,7 @@ impl MinecraftServer {
     /// # Arguments
     ///
     /// * `jar_path` - The path to the server jar file
-    pub async fn new(jar_path: PathBuf) -> Self {
+    pub async fn init(jar_path: PathBuf) -> Self {
         let config_path = jar_path.with_file_name(".ssw").join("ssw.toml");
         let old_config_path = config_path.with_extension("json");
         let ssw_config = if old_config_path.exists() {
