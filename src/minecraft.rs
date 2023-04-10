@@ -25,12 +25,18 @@ use zip::{write::FileOptions, CompressionMethod, ZipWriter};
 
 use crate::{
     config::{convert_json_to_toml, SswConfig},
-    log4j::patch_log4j,
-    manifest::VersionManifestV2,
-    mc_version::{get_required_java_version, try_read_version_from_jar},
+    minecraft::{
+        log4j::patch_log4j, manifest::VersionManifestV2, mc_version::get_required_java_version,
+    },
     ssw_error,
     util::{create_dir_if_not_exists, get_java_version, path_to_str},
 };
+
+use self::mc_version::try_read_version_from_jar;
+
+pub mod log4j;
+pub mod manifest;
+pub mod mc_version;
 
 /// Represents the state of a Minecraft server
 #[repr(u8)]
@@ -262,7 +268,11 @@ impl MinecraftServer {
         if let Some(mc_version_string) = mc_version_string {
             info!("Found Minecraft version in jar: {}", mc_version_string);
             let manifest = VersionManifestV2::load().await?;
-            let mc_version = manifest.versions().iter().find(|v| v.id == mc_version_string).unwrap();
+            let mc_version = manifest
+                .versions()
+                .iter()
+                .find(|v| v.id == mc_version_string)
+                .unwrap();
             let required_java_version =
                 get_required_java_version(mc_version)
                     .await

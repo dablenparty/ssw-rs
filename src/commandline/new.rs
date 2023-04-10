@@ -2,7 +2,9 @@ use std::{io, path::PathBuf};
 
 use clap::Args;
 
-use crate::{manifest::VersionManifestV2, ssw_error, util::async_create_dir_if_not_exists};
+use crate::{
+    minecraft::manifest::VersionManifestV2, ssw_error, util::async_create_dir_if_not_exists,
+};
 
 #[derive(Debug, Args)]
 pub struct NewArgs {
@@ -31,7 +33,7 @@ pub async fn new_main(args: NewArgs) -> ssw_error::Result<()> {
     let manifest = VersionManifestV2::load().await?;
     let version_str = args
         .mc_version
-        .unwrap_or_else(|| manifest.latest().release().to_owned());
+        .unwrap_or_else(|| manifest.latest().release().clone());
     let version = manifest
         .find_version(&version_str)
         .ok_or_else(|| ssw_error::Error::BadMinecraftVersion(version_str))?;

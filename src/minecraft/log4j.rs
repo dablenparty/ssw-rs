@@ -1,9 +1,8 @@
 use log::{debug, info};
 
-use crate::{
-    manifest::VersionManifestV2, mc_version::MinecraftVersion, minecraft::MinecraftServer,
-    ssw_error,
-};
+use crate::{minecraft::MinecraftServer, ssw_error};
+
+use super::{manifest::VersionManifestV2, mc_version::MinecraftVersion};
 
 /// Helper function to get a Minecraft version from a version string.
 /// It is very important to note that this function assumes the version string is valid.

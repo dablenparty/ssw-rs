@@ -4,7 +4,9 @@ use getset::Getters;
 use log::debug;
 use serde::Deserialize;
 
-use crate::{mc_version::MinecraftVersion, ssw_error, util::async_create_dir_if_not_exists};
+use crate::{ssw_error, util::async_create_dir_if_not_exists};
+
+use super::mc_version::MinecraftVersion;
 
 const MANIFEST_V2_LINK: &str = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
 

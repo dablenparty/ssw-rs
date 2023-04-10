@@ -8,9 +8,6 @@
 
 mod commandline;
 mod config;
-mod log4j;
-mod manifest;
-mod mc_version;
 mod minecraft;
 mod proxy;
 mod ssw_error;
@@ -25,8 +22,10 @@ use std::{
 
 use crate::{
     commandline::CommandLineArgs,
-    manifest::{refresh_manifest, VersionManifestV2},
-    minecraft::{MinecraftServer, DEFAULT_MC_PORT},
+    minecraft::{
+        manifest::{refresh_manifest, VersionManifestV2},
+        MinecraftServer, DEFAULT_MC_PORT,
+    },
 };
 use chrono::{DateTime, Local};
 use clap::Parser;
@@ -409,7 +408,8 @@ async fn get_or_set_mc_version(
     } else {
         let version = command_with_args[1];
         let manifest = VersionManifestV2::load().await?;
-        let _ = manifest.versions()
+        let _ = manifest
+            .versions()
             .iter()
             .find(|v| v.id == version)
             .ok_or_else(|| {
