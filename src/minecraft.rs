@@ -37,6 +37,7 @@ use self::mc_version::try_read_version_from_jar;
 pub mod log4j;
 pub mod manifest;
 pub mod mc_version;
+pub mod mc_version_data;
 
 /// Represents the state of a Minecraft server
 #[repr(u8)]
