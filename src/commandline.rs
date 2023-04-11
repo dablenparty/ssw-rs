@@ -14,6 +14,7 @@ pub mod start;
 pub enum CommandLineCommands {
     /// Starts a Minecraft server.
     Start(StartArgs),
+    /// Creates a new Minecraft server. Currently only supports Vanilla.
     New(NewArgs)
 }
 
