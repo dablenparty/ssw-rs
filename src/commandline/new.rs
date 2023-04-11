@@ -38,7 +38,7 @@ pub struct NewArgs {
 ///
 /// An error occurs if the specified directory is not empty, or if the server could not be created.
 /// This includes errors that occur while creating the server dir, downloading the server JAR, or
-/// patching Log4Shell.
+/// patching `Log4Shell`.
 pub async fn new_main(args: NewArgs) -> ssw_error::Result<()> {
     let server_dir = args.server_dir;
     info!("Creating new server in {}", server_dir.display());
@@ -46,9 +46,9 @@ pub async fn new_main(args: NewArgs) -> ssw_error::Result<()> {
         return Err(
             io::Error::new(io::ErrorKind::Other, "the specified directory is not empty").into(),
         );
-    } else {
-        async_create_dir_if_not_exists(&server_dir).await?;
     }
+    async_create_dir_if_not_exists(&server_dir).await?;
+
     let server_dir = dunce::canonicalize(server_dir)?;
     let manifest = VersionManifestV2::load().await?;
     let use_snapshot = args.snapshot;

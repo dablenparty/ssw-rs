@@ -15,7 +15,6 @@ pub struct VersionDownloadInfo {
 #[derive(Debug, Deserialize, Getters)]
 #[get = "pub"]
 pub struct VersionDownloadOptions {
-    client: VersionDownloadInfo,
     server: VersionDownloadInfo,
 }
 
@@ -30,7 +29,8 @@ pub struct VersionJavaInfo {
 #[serde(rename_all = "camelCase")]
 #[get = "pub"]
 pub struct MinecraftVersionData {
-    id: String,
+    // My instinct is to uncomment this, but this isn't a library and I don't use this field anywhere.
+    // id: String,
     downloads: VersionDownloadOptions,
     java_version: VersionJavaInfo,
 }
