@@ -1,19 +1,50 @@
 use std::{io, path::PathBuf};
 
+use getset::Getters;
 use log::debug;
 use serde::Deserialize;
 
-use crate::{mc_version::MinecraftVersion, ssw_error, util::async_create_dir_if_not_exists};
+use crate::{ssw_error, util::async_create_dir_if_not_exists};
+
+use super::mc_version::MinecraftVersion;
 
 const MANIFEST_V2_LINK: &str = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
+
+#[derive(Deserialize, Debug, Clone, Getters)]
+#[get = "pub"]
+pub struct LatestVersions {
+    release: String,
+    snapshot: String,
+}
 
 /// The manifest of all Minecraft versions.
 ///
 /// This struct is not a complete representation of the manifest, but only the parts that are needed.
-#[derive(Deserialize)]
-struct VersionManifestV2 {
+#[derive(Deserialize, Debug, Getters)]
+#[get = "pub"]
+pub struct VersionManifestV2 {
     /// The complete list of all Minecraft versions.
     versions: Vec<MinecraftVersion>,
+    latest: LatestVersions,
+}
+
+impl VersionManifestV2 {
+    /// Loads the launcher manifest from disk.
+    pub async fn load() -> io::Result<Self> {
+        let manifest_location = get_manifest_location();
+        debug!(
+            "Loading version manifest from {}",
+            manifest_location.display()
+        );
+        let manifest = tokio::fs::read_to_string(manifest_location).await?;
+        let manifest: VersionManifestV2 = serde_json::from_str(&manifest)?; // I could inline this, but ? implicitly converts the error to an io::Error
+        Ok(manifest)
+    }
+
+    /// Finds a Minecraft version by its ID, e.g. `1.17.1`, if it exists.
+    pub fn find_version(&self, id: &str) -> Option<&MinecraftVersion> {
+        self.versions.iter().find(|v| v.id == id)
+    }
 }
 
 /// Gets the location to the launcher manifest.
@@ -73,20 +104,4 @@ pub async fn refresh_manifest() -> ssw_error::Result<()> {
     debug!("Saving new manifest to {}", manifest_location.display());
     tokio::fs::write(manifest_location, manifest).await?;
     Ok(())
-}
-
-/// Loads the launcher manifest from the local file system.
-///
-/// # Errors
-///
-/// An error will be returned if the manifest fails to load or parse.
-pub async fn load_versions() -> io::Result<Vec<MinecraftVersion>> {
-    let manifest_location = get_manifest_location();
-    debug!(
-        "Loading version manifest from {}",
-        manifest_location.display()
-    );
-    let manifest = tokio::fs::read_to_string(manifest_location).await?;
-    let manifest: VersionManifestV2 = serde_json::from_str(&manifest)?;
-    Ok(manifest.versions)
 }

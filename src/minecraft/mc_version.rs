@@ -3,7 +3,6 @@ use std::{io, path::Path};
 use chrono::{DateTime, Utc};
 use log::warn;
 use serde::Deserialize;
-use serde_json::Value;
 
 /// A Minecraft version type
 #[repr(u8)]
@@ -46,29 +45,6 @@ impl PartialOrd for MinecraftVersion {
 impl Ord for MinecraftVersion {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.release_time.cmp(&other.release_time)
-    }
-}
-
-/// Gets the required version of Java for the given Minecraft version.
-///
-/// `MinecraftVersion` structs have a `url` field that points to an API with more information about the version.
-///
-/// # Arguments
-///
-/// * `mc_version`: the Minecraft version to get the required Java version for
-///
-/// # Errors
-///
-/// An error will be returned if the API call fails or if it returns an invalid response.
-pub async fn get_required_java_version(mc_version: &MinecraftVersion) -> reqwest::Result<String> {
-    let response: Value = reqwest::get(&mc_version.url).await?.json().await?;
-    let major_version = response["javaVersion"]["majorVersion"]
-        .as_u64()
-        .unwrap_or(17);
-    if major_version <= 8 {
-        Ok(format!("1.{}", major_version))
-    } else {
-        Ok(format!("{}.0", major_version))
     }
 }
 

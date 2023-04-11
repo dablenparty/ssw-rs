@@ -15,9 +15,10 @@ bench = false
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.0", features = ["derive"] }
 dunce = "1.0"
-duration-string = "0.1"
+duration-string = "0.3"
 flate2 = "1.0"
 futures = "0.3"
+getset = "0.1.2"
 glob = "0.3"
 lazy_static = "1.4"
 log = "0.4"
@@ -29,10 +30,10 @@ simplelog = { version = "0.12", features = ["paris", "termcolor"] }
 time = { version = "0.3", features = ["formatting", "macros"] }
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
-toml = "0.5"
+toml = "0.7"
 walkdir = "2"
-which = "4.3"
+which = "4.4"
 zip = "0.6"
 
 [target.'cfg(not(windows))'.dependencies]
-dirs = "4.0"
+dirs = "5.0"

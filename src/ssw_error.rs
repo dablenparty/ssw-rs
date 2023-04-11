@@ -8,6 +8,7 @@ pub enum Error {
     /// Raised when the second argument, the actual version string, is lower than the first argument,
     /// the minimum required version string.
     BadJavaVersion(String, String),
+    BadMinecraftVersion(String),
     EnvVarError(env::VarError),
     IoError(io::Error),
     JsonError(serde_json::Error),
@@ -29,6 +30,11 @@ impl fmt::Display for Error {
                 f,
                 "Java version '{}' is less than the required '{}'",
                 actual, required
+            ),
+            Error::BadMinecraftVersion(version) => write!(
+                f,
+                "Minecraft version '{}' is not valid. Please check the spelling.",
+                version
             ),
             Error::EnvVarError(e) => write!(f, "Environment variable error: {}", e),
             Error::IoError(e) => write!(f, "IO error: {}", e),

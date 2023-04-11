@@ -1,8 +1,8 @@
 use log::{debug, info};
 
-use crate::{
-    manifest::load_versions, mc_version::MinecraftVersion, minecraft::MinecraftServer, ssw_error,
-};
+use crate::{minecraft::MinecraftServer, ssw_error};
+
+use super::{manifest::VersionManifestV2, mc_version::MinecraftVersion};
 
 /// Helper function to get a Minecraft version from a version string.
 /// It is very important to note that this function assumes the version string is valid.
@@ -32,7 +32,8 @@ fn get_version_by_id<'a>(versions: &'a [MinecraftVersion], id: &str) -> &'a Mine
 /// - The patch file fails to download or write
 /// - The server config fails to save
 pub async fn patch_log4j(mc_server: &mut MinecraftServer) -> ssw_error::Result<()> {
-    let versions = load_versions().await?;
+    let manifest = VersionManifestV2::load().await?;
+    let versions = manifest.versions();
     let server_version_id = mc_server
         .ssw_config
         .mc_version
@@ -43,17 +44,17 @@ pub async fn patch_log4j(mc_server: &mut MinecraftServer) -> ssw_error::Result<(
         .iter()
         .find(|version| version.id == *server_version_id)
         .unwrap();
-    let (arg, url) = if server_version >= get_version_by_id(&versions, "1.18.1") {
+    let (arg, url) = if server_version >= get_version_by_id(versions, "1.18.1") {
         // no patch needed (too new)
         (None, None)
-    } else if server_version >= get_version_by_id(&versions, "1.17") {
+    } else if server_version >= get_version_by_id(versions, "1.17") {
         (Some("-Dlog4j2.formatMsgNoLookups=true"), None)
-    } else if get_version_by_id(&versions, "1.12") <= server_version
-        && server_version <= get_version_by_id(&versions, "1.16.5")
+    } else if get_version_by_id(versions, "1.12") <= server_version
+        && server_version <= get_version_by_id(versions, "1.16.5")
     {
         (Some("-Dlog4j.configurationFile=log4j2_112-116.xml"), Some("https://launcher.mojang.com/v1/objects/02937d122c86ce73319ef9975b58896fc1b491d1/log4j2_112-116.xml"))
-    } else if get_version_by_id(&versions, "1.7") <= server_version
-        && server_version <= get_version_by_id(&versions, "1.11.2")
+    } else if get_version_by_id(versions, "1.7") <= server_version
+        && server_version <= get_version_by_id(versions, "1.11.2")
     {
         (Some("-Dlog4j.configurationFile=log4j2_17-111.xml"), Some("https://launcher.mojang.com/v1/objects/4bb89a97a66f350bc9f73b3ca8509632682aea2e/log4j2_17-111.xml"))
     } else {

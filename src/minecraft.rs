@@ -25,12 +25,19 @@ use zip::{write::FileOptions, CompressionMethod, ZipWriter};
 
 use crate::{
     config::{convert_json_to_toml, SswConfig},
-    log4j::patch_log4j,
-    manifest::load_versions,
-    mc_version::{get_required_java_version, try_read_version_from_jar},
+    minecraft::{
+        log4j::patch_log4j, manifest::VersionManifestV2, mc_version_data::MinecraftVersionData,
+    },
     ssw_error,
     util::{create_dir_if_not_exists, get_java_version, path_to_str},
 };
+
+use self::mc_version::try_read_version_from_jar;
+
+pub mod log4j;
+pub mod manifest;
+pub mod mc_version;
+pub mod mc_version_data;
 
 /// Represents the state of a Minecraft server
 #[repr(u8)]
@@ -84,7 +91,7 @@ impl MinecraftServer {
     /// # Arguments
     ///
     /// * `jar_path` - The path to the server jar file
-    pub async fn new(jar_path: PathBuf) -> Self {
+    pub async fn init(jar_path: PathBuf) -> Self {
         let config_path = jar_path.with_file_name(".ssw").join("ssw.toml");
         let old_config_path = config_path.with_extension("json");
         let ssw_config = if old_config_path.exists() {
@@ -249,7 +256,7 @@ impl MinecraftServer {
     /// # Panics
     ///
     /// This function will panic if the server jar somehow does not have a parent component.
-    pub async fn load_version(&mut self) -> io::Result<()> {
+    pub async fn load_version(&mut self) -> ssw_error::Result<()> {
         let mc_version_string = try_read_version_from_jar(
             self.jar_path()
                 .parent()
@@ -261,15 +268,22 @@ impl MinecraftServer {
         });
         if let Some(mc_version_string) = mc_version_string {
             info!("Found Minecraft version in jar: {}", mc_version_string);
-            let versions = load_versions().await?;
-            let mc_version = versions.iter().find(|v| v.id == mc_version_string).unwrap();
-            let required_java_version =
-                get_required_java_version(mc_version)
-                    .await
-                    .unwrap_or_else(|e| {
-                        warn!("error occurred requesting the required Java version: {}", e);
-                        "17.0".to_string()
-                    });
+            let manifest = VersionManifestV2::load().await?;
+            let mc_version = manifest.find_version(&mc_version_string).unwrap();
+            let required_java_version = MinecraftVersionData::async_try_from(mc_version)
+                .await
+                .map_or_else(
+                    |e| {
+                        warn!("error occurred trying to get version data: {}", e);
+                        17
+                    },
+                    |d| *d.java_version().major_version(),
+                );
+            let required_java_version = if required_java_version <= 8 {
+                format!("1.{}", required_java_version)
+            } else {
+                format!("{}.0", required_java_version)
+            };
             info!("Found required Java version: {}", required_java_version);
             self.ssw_config.mc_version = Some(mc_version_string);
             self.ssw_config.required_java_version = required_java_version;
