@@ -18,9 +18,14 @@ pub struct NewArgs {
     #[arg(required = true)]
     server_dir: PathBuf,
 
-    /// The Minecraft version to use.
+    /// The Minecraft version to use. If not specified, the latest release version is used.
     #[arg(short, long, value_parser)]
     mc_version: Option<String>,
+
+    /// Whether to use the latest snapshot version instead of the latest release version.
+    /// This option is ignored if `mc-version` is specified.
+    #[arg(short, long)]
+    snapshot: bool,
 }
 
 /// Main function for the `new` subcommand. Makes a new Minecraft server.
@@ -46,9 +51,15 @@ pub async fn new_main(args: NewArgs) -> ssw_error::Result<()> {
     }
     let server_dir = dunce::canonicalize(server_dir)?;
     let manifest = VersionManifestV2::load().await?;
-    let version_str = args
-        .mc_version
-        .unwrap_or_else(|| manifest.latest().release().clone());
+    let use_snapshot = args.snapshot;
+    let version_str = args.mc_version.unwrap_or_else(|| {
+        let latest_data = manifest.latest();
+        if use_snapshot {
+            latest_data.snapshot().clone()
+        } else {
+            latest_data.release().clone()
+        }
+    });
     let version = manifest
         .find_version(&version_str)
         .ok_or_else(|| ssw_error::Error::BadMinecraftVersion(version_str))?;
@@ -71,6 +82,7 @@ pub async fn new_main(args: NewArgs) -> ssw_error::Result<()> {
     tokio::fs::write(&server_jar, response_bytes).await?;
     let mut mc_server = MinecraftServer::init(server_jar.clone()).await;
     mc_server.ssw_config.mc_version = Some(version.id.clone());
+    mc_server.save_config().await?;
     patch_log4j(&mut mc_server).await?;
     info!("Done! Server created at {}", server_jar.display());
     Ok(())
