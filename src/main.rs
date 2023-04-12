@@ -581,6 +581,10 @@ fn start_stdin_task(tx: Sender<SswEvent>, cancel_token: CancellationToken) -> Jo
                         warn!("Stdin closed, no more input will be accepted");
                         break;
                     }
+                    if n == 1 {
+                        // only a newline was read
+                        continue;
+                    }
                     let is_exit_command = buf.trim() == EXIT_COMMAND;
                     if let Err(e) = tx.send(SswEvent::StdinMessage(buf)).await {
                         error!("Error sending message from stdin task: {}", e);
