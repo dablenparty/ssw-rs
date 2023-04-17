@@ -31,13 +31,13 @@ fn get_version_by_id<'a>(versions: &'a [MinecraftVersion], id: &str) -> &'a Mine
 /// - The server version is not specified
 /// - The patch file fails to download or write
 /// - The server config fails to save
-pub async fn patch_log4j(mc_server: &mut MinecraftServer) -> ssw_error::Result<()> {
+pub async fn patch_log4j(mc_server: &mut MinecraftServer<'_>) -> ssw_error::Result<()> {
     let manifest = VersionManifestV2::load().await?;
     let versions = manifest.versions();
     let server_version_id = mc_server
         .ssw_config
         .mc_version
-        .as_ref()
+        .clone()
         .ok_or(ssw_error::Error::MissingMinecraftVersion)?;
     // unwrap is safe because the version id is validated when it is assigned
     let server_version = versions
@@ -73,10 +73,12 @@ pub async fn patch_log4j(mc_server: &mut MinecraftServer) -> ssw_error::Result<(
         }
     }
 
+    let config = &mut mc_server.ssw_config;
+
     if let Some(arg) = arg {
         let arg = arg.to_string();
-        if !mc_server.ssw_config.jvm_args.contains(&arg) {
-            mc_server.ssw_config.jvm_args.push(arg);
+        if !config.jvm_args.contains(&arg) {
+            config.to_mut().jvm_args.to_mut().push(arg);
         }
     }
 

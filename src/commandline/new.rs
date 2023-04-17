@@ -81,7 +81,7 @@ pub async fn new_main(args: NewArgs) -> ssw_error::Result<()> {
         .await?;
     tokio::fs::write(&server_jar, response_bytes).await?;
     let mut mc_server = MinecraftServer::init(server_jar.clone()).await;
-    mc_server.ssw_config.mc_version = Some(version.id.clone());
+    mc_server.ssw_config.to_mut().mc_version = Some(version.id.clone());
     mc_server.save_config().await?;
     patch_log4j(&mut mc_server).await?;
     info!("Done! Server created at {}", server_jar.display());

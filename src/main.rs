@@ -17,7 +17,7 @@ use std::{
     io::{self, Write},
     path::PathBuf,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::Duration, borrow::Cow,
 };
 
 use crate::{
@@ -104,7 +104,7 @@ async fn main() -> ssw_error::Result<()> {
 ///
 /// returns: `()`
 async fn run_ssw_event_loop(
-    mc_server: &mut MinecraftServer,
+    mc_server: &mut MinecraftServer<'_>,
     proxy_cancel_token: CancellationToken,
     event_channels: (Sender<SswEvent>, Receiver<SswEvent>),
     proxy_tx: Sender<u16>,
@@ -214,7 +214,7 @@ async fn run_ssw_event_loop(
 /// * `mc_server`: the Minecraft server instance
 async fn handle_start_command(
     current_server_status: MCServerState,
-    mc_server: &mut MinecraftServer,
+    mc_server: &mut MinecraftServer<'_>,
 ) {
     if current_server_status == minecraft::MCServerState::Stopped {
         if let Err(e) = mc_server.run().await {
@@ -325,7 +325,7 @@ async fn restart_task(wait_for: Duration, event_tx: Sender<SswEvent>) {
 /// # Arguments
 ///
 /// * `mc_server` - The Minecraft server to stop.
-async fn gracefully_stop_server(mc_server: &mut MinecraftServer) {
+async fn gracefully_stop_server(mc_server: &mut MinecraftServer<'_>) {
     if let Err(e) = mc_server.stop().await {
         error!("Failed to send stop command to server: {:?}", e);
     }
@@ -340,7 +340,7 @@ async fn gracefully_stop_server(mc_server: &mut MinecraftServer) {
 ///
 /// * `mc_server` - The Minecraft server to get the port from.
 /// * `proxy_tx` - The proxy's event sender.
-async fn send_port_to_proxy(mc_server: &mut MinecraftServer, proxy_tx: &Sender<u16>) {
+async fn send_port_to_proxy(mc_server: &mut MinecraftServer<'_>, proxy_tx: &Sender<u16>) {
     let port: u16 = mc_server
         .get_property("server-port")
         .map_or(DEFAULT_MC_PORT.into(), |v| {
@@ -367,13 +367,13 @@ async fn send_port_to_proxy(mc_server: &mut MinecraftServer, proxy_tx: &Sender<u
 /// returns: `ssw_error::Result<()>`
 async fn get_or_set_ssw_port(
     command_with_args: &[&str],
-    mc_server: &mut MinecraftServer,
+    mc_server: &mut MinecraftServer<'_>,
 ) -> ssw_error::Result<()> {
     if command_with_args.len() == 1 {
         info!("Current SSW port: {}", mc_server.ssw_config.ssw_port);
     } else {
         let port = command_with_args[1].parse::<u16>()?;
-        mc_server.ssw_config.ssw_port = port;
+        mc_server.ssw_config.to_mut().ssw_port = port;
         mc_server.save_config().await?;
         info!(
             "Successfully set SSW port to {}. Please restart the application to apply the changes.",
@@ -395,7 +395,7 @@ async fn get_or_set_ssw_port(
 /// An error will be returned if the given version is invalid or an IO error occurs.
 async fn get_or_set_mc_version(
     command_with_args: &[&str],
-    mc_server: &mut MinecraftServer,
+    mc_server: &mut MinecraftServer<'_>,
 ) -> ssw_error::Result<()> {
     if command_with_args.len() == 1 {
         println!(
@@ -419,7 +419,7 @@ async fn get_or_set_mc_version(
                     format!("Invalid Minecraft version: {}", version),
                 )
             })?;
-        mc_server.ssw_config.mc_version = Some(version.to_string());
+        mc_server.ssw_config.to_mut().mc_version = Some(version.to_string());
         mc_server
             .ssw_config
             .save(&mc_server.get_config_path())
@@ -439,7 +439,7 @@ async fn get_or_set_mc_version(
 /// returns: `()`
 async fn get_or_set_mc_port(
     command_with_args: &[&str],
-    mc_server: &mut MinecraftServer,
+    mc_server: &mut MinecraftServer<'_>,
 ) -> ssw_error::Result<()> {
     if let Some(arg) = command_with_args.get(1) {
         let _: u16 = arg.parse()?;
@@ -516,7 +516,7 @@ fn print_help() {
 ///
 /// returns: `(JoinHandle<()>, CancellationToken, Sender<u16>)`
 fn start_proxy_task(
-    ssw_config: config::SswConfig,
+    ssw_config: Cow<'static, config::SswConfig>,
     proxy_ip: String,
     server_state: Arc<Mutex<MCServerState>>,
     server_state_rx: broadcast::Receiver<MCServerState>,
