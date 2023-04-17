@@ -9,7 +9,6 @@ use super::mc_version::MinecraftVersion;
 #[get = "pub"]
 pub struct VersionDownloadInfo {
     url: String,
-    size: u64,
 }
 
 #[derive(Debug, Deserialize, Getters)]
