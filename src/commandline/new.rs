@@ -9,7 +9,7 @@ use crate::{
         MinecraftServer,
     },
     ssw_error,
-    util::async_create_dir_if_not_exists,
+    util::{async_create_dir_if_not_exists, download_file_with_progress},
 };
 
 #[derive(Debug, Args)]
@@ -63,23 +63,17 @@ pub async fn new_main(args: NewArgs) -> ssw_error::Result<()> {
     let version = manifest
         .find_version(&version_str)
         .ok_or_else(|| ssw_error::Error::BadMinecraftVersion(version_str))?;
-
-    info!("Downloading Minecraft server version {}", version.id);
+    let download_message = format!("Downloading Minecraft server version {}", version.id);
+    info!("{}", download_message);
 
     let version_data = MinecraftVersionData::async_try_from(version).await?;
     let server_info = version_data.downloads().server();
     let server_url = server_info.url();
-    let server_size = server_info.size();
     debug!("Server URL: {}", server_url);
-    debug!("Server size: {} bytes", server_size);
-
     let server_jar = server_dir.join("server.jar");
-    let response_bytes = reqwest::get(server_url)
-        .await?
-        .error_for_status()?
-        .bytes()
-        .await?;
-    tokio::fs::write(&server_jar, response_bytes).await?;
+
+    download_file_with_progress(server_url, &server_jar).await?;
+
     let mut mc_server = MinecraftServer::init(server_jar.clone()).await;
     mc_server.ssw_config.to_mut().mc_version = Some(version.id.clone());
     mc_server.save_config().await?;

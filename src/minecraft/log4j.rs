@@ -1,6 +1,6 @@
 use log::{debug, info};
 
-use crate::{minecraft::MinecraftServer, ssw_error};
+use crate::{minecraft::MinecraftServer, ssw_error, util::download_file_with_progress};
 
 use super::{manifest::VersionManifestV2, mc_version::MinecraftVersion};
 
@@ -68,8 +68,9 @@ pub async fn patch_log4j(mc_server: &mut MinecraftServer<'_>) -> ssw_error::Resu
         let file_name = url.split('/').last().unwrap();
         let log4j_config_path = mc_server.jar_path().with_file_name(file_name);
         if !log4j_config_path.exists() {
-            let text = reqwest::get(url).await?.text().await?;
-            tokio::fs::write(&log4j_config_path, text).await?;
+            download_file_with_progress(url, &log4j_config_path).await?;
+            // let text = reqwest::get(url).await?.text().await?;
+            // tokio::fs::write(&log4j_config_path, text).await?;
         }
     }
 
