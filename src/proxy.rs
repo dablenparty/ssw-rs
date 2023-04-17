@@ -2,7 +2,7 @@ use std::{
     collections::{hash_map, HashMap},
     io,
     net::SocketAddr,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, borrow::Cow,
 };
 
 use log::{debug, error, info, warn};
@@ -30,11 +30,11 @@ struct ConnectedClient {
     is_real: bool,
 }
 
-pub struct ProxyConfig {
+pub struct ProxyConfig<'p> {
     /// IP address to listen on (without port).
     pub ip: String,
     /// SSW config to use.
-    pub ssw_config: crate::config::SswConfig,
+    pub ssw_config: Cow<'p, crate::config::SswConfig<'p>>,
     /// Thread-safe mutex around the Minecraft server state.
     pub server_state: Arc<Mutex<MCServerState>>,
     /// Sender to send events to the main thread.
@@ -59,7 +59,7 @@ pub struct ProxyConfig {
 ///
 /// An error is returned if the TCP listener fails to bind to the port or accept a new connection.
 pub async fn run_proxy(
-    config: ProxyConfig,
+    config: ProxyConfig<'_>,
     cancellation_token: CancellationToken,
 ) -> io::Result<()> {
     const REAL_CONNECTION_SECS: u64 = 5;

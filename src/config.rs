@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::{path::{Path, PathBuf}, borrow::Cow};
 
 use log::info;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -9,7 +9,7 @@ use crate::{ssw_error, util::async_create_dir_if_not_exists};
 /// The SSW server configuration
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(default)]
-pub struct SswConfig {
+pub struct SswConfig<'s> {
     /// How much memory to allocate to the server in gigabytes
     pub memory_in_gb: f64,
     /// How long to wait (in hours) before restarting the server
@@ -24,14 +24,14 @@ pub struct SswConfig {
     /// The required Java version string for the associated Minecraft server
     pub required_java_version: String,
     /// Extra arguments to pass to the JVM when starting the server
-    pub jvm_args: Vec<String>,
+    pub jvm_args: Cow<'s, Vec<String>>,
     /// Whether to automatically backup the server on startup
     pub auto_backup: bool,
     /// The maximum number of backups to keep
     pub max_backups: usize,
 }
 
-impl Default for SswConfig {
+impl Default for SswConfig<'_> {
     fn default() -> Self {
         Self {
             memory_in_gb: 1.0,
@@ -40,14 +40,14 @@ impl Default for SswConfig {
             ssw_port: 25566,
             mc_version: None,
             required_java_version: "17.0".to_string(),
-            jvm_args: Vec::new(),
+            jvm_args: Cow::Owned(vec![]),
             auto_backup: true,
             max_backups: 5,
         }
     }
 }
 
-impl SswConfig {
+impl<'s> SswConfig<'s> {
     /// Attempt to load a config from the given path
     ///
     /// # Arguments
@@ -59,7 +59,7 @@ impl SswConfig {
     /// An error may occur when reading or writing the config file, as well as in the serialization/deserialization process.
     ///
     /// returns: `serde_json::Result<SswConfig>`
-    pub async fn from_path(config_path: &Path) -> ssw_error::Result<Self> {
+    pub async fn from_path(config_path: &Path) -> ssw_error::Result<SswConfig<'s>> {
         if config_path.exists() {
             info!("Found existing SSW config");
             let config_string = tokio::fs::read_to_string(config_path).await?;

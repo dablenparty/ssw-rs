@@ -4,7 +4,7 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
     process,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, borrow::Cow,
 };
 
 use chrono::Utc;
@@ -61,7 +61,7 @@ pub const DEFAULT_MC_PORT: u16 = 25565;
 type MCServerProperties = HashMap<String, Value>;
 
 /// Represents a Minecraft server
-pub struct MinecraftServer {
+pub struct MinecraftServer<'a> {
     /// Thread-safe mutex lock on the server state as it needs to be accessed by multiple threads
     state: Arc<Mutex<MCServerState>>,
     /// A join handle to the exit handler task
@@ -78,11 +78,11 @@ pub struct MinecraftServer {
     /// Deserialized server.properties file
     properties: Option<MCServerProperties>,
     /// The SSW server configuration
-    pub ssw_config: SswConfig,
+    pub ssw_config: Cow<'a, SswConfig<'a>>,
     pub show_output: bool,
 }
 
-impl MinecraftServer {
+impl<'a> MinecraftServer<'a> {
     /// Creates a new `MinecraftServer` struct.
     ///
     /// This will not start the server, only prepare it. This involves checking
@@ -91,7 +91,7 @@ impl MinecraftServer {
     /// # Arguments
     ///
     /// * `jar_path` - The path to the server jar file
-    pub async fn init(jar_path: PathBuf) -> Self {
+    pub async fn init(jar_path: PathBuf) -> MinecraftServer<'a> {
         let config_path = jar_path.with_file_name(".ssw").join("ssw.toml");
         let old_config_path = config_path.with_extension("json");
         let ssw_config = if old_config_path.exists() {
@@ -116,7 +116,7 @@ impl MinecraftServer {
             exit_handler: None,
             server_stdin_sender: None,
             server_status_broadcast_channels: broadcast::channel(1),
-            ssw_config,
+            ssw_config: Cow::Owned(ssw_config),
             properties: None,
             show_output: true,
         };
@@ -285,8 +285,9 @@ impl MinecraftServer {
                 format!("{}.0", required_java_version)
             };
             info!("Found required Java version: {}", required_java_version);
-            self.ssw_config.mc_version = Some(mc_version_string);
-            self.ssw_config.required_java_version = required_java_version;
+            let mut self_ssw_config = self.ssw_config.to_mut();
+            self_ssw_config.mc_version = Some(mc_version_string);
+            self_ssw_config.required_java_version = required_java_version;
             if let Err(e) = self.ssw_config.save(&self.get_config_path()).await {
                 error!("failed to save SSW config: {:?}", e);
             }
@@ -420,12 +421,13 @@ impl MinecraftServer {
         self.check_java_version(&java_executable).await?;
         info!("Loading SSW config...");
         let config_path = self.get_config_path();
-        self.ssw_config = SswConfig::from_path(&config_path)
+        let ssw_config = SswConfig::from_path(&config_path)
             .await
             .unwrap_or_else(|e| {
                 error!("Failed to load SSW config, using default: {}", e);
                 SswConfig::default()
             });
+        self.ssw_config = Cow::Owned(ssw_config);
         info!("SSW config loaded: {:#?}", self.ssw_config);
         self.load_properties().await;
         if let Some(port) = self.get_property("server-port") {
