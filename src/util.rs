@@ -1,12 +1,18 @@
 use std::{
+    cmp::min,
     fs::create_dir_all,
     io,
     path::{Path, PathBuf},
 };
 
+use futures::StreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
 use lazy_static::lazy_static;
-use log::debug;
+use log::{debug, warn};
 use regex::bytes::Regex;
+use tokio::io::AsyncWriteExt;
+
+use crate::ssw_error;
 
 /// Gets the path to the directory containing the executable, resolving symlinks if necessary.
 ///
@@ -157,4 +163,58 @@ pub fn path_to_str(path: &Path) -> io::Result<&str> {
             format!("path '{}' is not valid UTF-8", path.display()),
         )
     })
+}
+
+/// Downloads a file from the given URL to the given destination path, displaying a progress bar.
+///
+/// # Arguments
+///
+/// * `url`: the URL to download from
+/// * `dest`: the path to download to. If the files exists, it is overwritten.
+pub async fn download_file_with_progress(url: &str, dest: &Path) -> ssw_error::Result<()> {
+    if dest.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("{} is a directory", dest.display()),
+        )
+        .into());
+    }
+    let parent = dest.parent().unwrap_or_else(|| Path::new("."));
+    async_create_dir_if_not_exists(parent).await?;
+    debug!("downloading {} to {}", url, dest.display());
+    let response = reqwest::get(url).await?.error_for_status()?;
+    let total_size = response.content_length().unwrap_or_else(|| {
+        warn!("failed to get content length for {}", url);
+        0
+    });
+    debug!("total size: {} bytes", total_size);
+    let mut file_handle = tokio::fs::File::create(&dest).await?;
+    let mut bytes_downloaded = 0u64;
+    let mut stream = response.bytes_stream();
+
+    let pb = ProgressBar::new(total_size);
+    pb.set_style(ProgressStyle::default_bar()
+        .template("{msg}\n{spinner:.green} [{elapsed}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+        .unwrap()
+        .progress_chars("=>-"));
+    let file_name = dest.file_name().unwrap();
+    pb.set_message(format!("Downloading {}", file_name.to_string_lossy()));
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        file_handle.write_all(&chunk).await?;
+        let chunk_size = chunk.len() as u64;
+        // sometimes, the chunk size is slightly wrong, so we need to clamp the downloaded bytes to the
+        // server size; although, it's ok for a general progress bar.
+        bytes_downloaded = min(
+            total_size,
+            bytes_downloaded.checked_add(chunk_size).unwrap_or_else(|| {
+                warn!("Downloaded more than 2^128 bytes of data. This is probably a bug.");
+                bytes_downloaded
+            }),
+        );
+        pb.set_position(bytes_downloaded);
+    }
+    pb.finish_with_message(format!("Downloaded {} to {}", url, dest.display()));
+    Ok(())
 }
