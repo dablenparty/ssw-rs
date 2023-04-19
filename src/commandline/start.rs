@@ -24,7 +24,8 @@ pub struct StartArgs {
 }
 
 pub async fn start_main(args: StartArgs) -> io::Result<()> {
-    let mut mc_server = MinecraftServer::init(dunce::canonicalize(args.server_jar)?).await;
+    let server_jar = dunce::canonicalize(args.server_jar)?;
+    let mut mc_server = MinecraftServer::init(server_jar).await;
     mc_server.show_output = !args.no_mc_output;
     if mc_server.ssw_config.mc_version.is_none() {
         if let Err(e) = mc_server.load_version().await {
