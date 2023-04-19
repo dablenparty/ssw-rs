@@ -2,20 +2,7 @@ use log::{debug, info};
 
 use crate::{minecraft::MinecraftServer, ssw_error, util::download_file_with_progress};
 
-use super::{manifest::VersionManifestV2, mc_version::MinecraftVersion};
-
-/// Helper function to get a Minecraft version from a version string.
-/// It is very important to note that this function assumes the version string is valid.
-/// This decision was made as this function is always used in a context where the version string
-/// is known to be valid.
-///
-/// # Arguments
-///
-/// * `versions` - The list of versions to search through.
-/// * `id` - The version string to search for.
-fn get_version_by_id<'a>(versions: &'a [MinecraftVersion], id: &str) -> &'a MinecraftVersion {
-    versions.iter().find(|v| v.id == id).unwrap()
-}
+use super::manifest::VersionManifestV2;
 
 /// Patch the Log4j vulnerability in a Minecraft server.
 /// More information can be found on the [Minecraft website](https://help.minecraft.net/hc/en-us/articles/4416199399693-Security-Vulnerability-in-Minecraft-Java-Edition).
@@ -33,28 +20,24 @@ fn get_version_by_id<'a>(versions: &'a [MinecraftVersion], id: &str) -> &'a Mine
 /// - The server config fails to save
 pub async fn patch_log4j(mc_server: &mut MinecraftServer<'_>) -> ssw_error::Result<()> {
     let manifest = VersionManifestV2::load().await?;
-    let versions = manifest.versions();
     let server_version_id = mc_server
         .ssw_config
         .mc_version
         .clone()
         .ok_or(ssw_error::Error::MissingMinecraftVersion)?;
     // unwrap is safe because the version id is validated when it is assigned
-    let server_version = versions
-        .iter()
-        .find(|version| version.id == *server_version_id)
-        .unwrap();
-    let (arg, url) = if server_version >= get_version_by_id(versions, "1.18.1") {
+    let server_version = manifest.find_version(&server_version_id).unwrap();
+    let (arg, url) = if server_version >= manifest.find_version("1.18.1").unwrap() {
         // no patch needed (too new)
         (None, None)
-    } else if server_version >= get_version_by_id(versions, "1.17") {
+    } else if server_version >= manifest.find_version("1.17").unwrap() {
         (Some("-Dlog4j2.formatMsgNoLookups=true"), None)
-    } else if get_version_by_id(versions, "1.12") <= server_version
-        && server_version <= get_version_by_id(versions, "1.16.5")
+    } else if manifest.find_version("1.12").unwrap() <= server_version
+        && server_version <= manifest.find_version("1.16.5").unwrap()
     {
         (Some("-Dlog4j.configurationFile=log4j2_112-116.xml"), Some("https://launcher.mojang.com/v1/objects/02937d122c86ce73319ef9975b58896fc1b491d1/log4j2_112-116.xml"))
-    } else if get_version_by_id(versions, "1.7") <= server_version
-        && server_version <= get_version_by_id(versions, "1.11.2")
+    } else if manifest.find_version("1.7").unwrap() <= server_version
+        && server_version <= manifest.find_version("1.11.2").unwrap()
     {
         (Some("-Dlog4j.configurationFile=log4j2_17-111.xml"), Some("https://launcher.mojang.com/v1/objects/4bb89a97a66f350bc9f73b3ca8509632682aea2e/log4j2_17-111.xml"))
     } else {
@@ -69,8 +52,6 @@ pub async fn patch_log4j(mc_server: &mut MinecraftServer<'_>) -> ssw_error::Resu
         let log4j_config_path = mc_server.jar_path().with_file_name(file_name);
         if !log4j_config_path.exists() {
             download_file_with_progress(url, &log4j_config_path).await?;
-            // let text = reqwest::get(url).await?.text().await?;
-            // tokio::fs::write(&log4j_config_path, text).await?;
         }
     }
 
