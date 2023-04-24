@@ -1,8 +1,9 @@
 use std::{
+    borrow::Cow,
     collections::{hash_map, HashMap},
     io,
     net::SocketAddr,
-    sync::{Arc, Mutex}, borrow::Cow,
+    sync::{Arc, Mutex},
 };
 
 use log::{debug, error, info, warn};
@@ -313,6 +314,8 @@ async fn connection_handler(mut client_stream: TcpStream, mc_port: u16) -> io::R
             return Ok(());
         }
     };
+    client_stream.set_nodelay(true)?;
+    server_stream.set_nodelay(true)?;
     // I'm upset I didn't find this sooner. This function solved almost all performance issues with
     // the proxy and passing TCP packets between the client and server.
     tokio::io::copy_bidirectional(&mut client_stream, &mut server_stream).await?;
