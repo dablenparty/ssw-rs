@@ -3,6 +3,7 @@ use log::{info, LevelFilter};
 use crate::logging::init_logging;
 
 mod logging;
+mod minecraft;
 
 #[tokio::main]
 async fn main() {
