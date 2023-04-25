@@ -24,6 +24,7 @@ glob = "0.3"
 indicatif = "0.17.3"
 lazy_static = "1.4"
 log = "0.4"
+mcping = { git = "https://github.com/Scetch/mcping.git", features = ["tokio-runtime"] }
 regex = "1.7"
 reqwest = { version = "0.11", features = ["json", "stream"] }
 serde = { version = "1.0", features = ["derive"] }
