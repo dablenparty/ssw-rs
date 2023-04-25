@@ -239,8 +239,8 @@ async fn connection_manager(
                         }));
                     }
                 } else {
-                    info!("Server is not empty, cancelling shutdown timer");
                     if let Some(handle) = shutdown_task {
+                        info!("Server is not empty, cancelling shutdown timer");
                         handle.abort();
                     }
                     shutdown_task = None;
