@@ -14,10 +14,11 @@ mod ssw_error;
 mod util;
 
 use std::{
+    borrow::Cow,
     io::{self, Write},
     path::PathBuf,
     sync::{Arc, Mutex},
-    time::Duration, borrow::Cow,
+    time::Duration,
 };
 
 use crate::{
@@ -42,8 +43,6 @@ use tokio::sync::{broadcast, mpsc::Receiver};
 use tokio::{io::AsyncBufReadExt, select, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use util::{create_dir_if_not_exists, get_exe_parent_dir};
-
-use crate::proxy::run_proxy;
 
 /// Represents an event that can be sent to the main thread.
 #[derive(Debug)]
@@ -537,7 +536,7 @@ fn start_proxy_task(
     let handle = tokio::spawn(async move {
         let inner_clone = cloned_token.clone();
         select! {
-            r = run_proxy(proxy_config, inner_clone) => {
+            r = proxy_config.run(inner_clone) => {
                 if let Err(e) = r {
                     if e.kind() == io::ErrorKind::AddrInUse {
                         error!("Failed to start proxy: port {} is already in use", port);

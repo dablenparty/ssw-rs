@@ -5,8 +5,7 @@ use log::{debug, info};
 
 use crate::{
     minecraft::{
-        log4j::patch_log4j, manifest::VersionManifestV2, mc_version_data::MinecraftVersionData,
-        MinecraftServer,
+        manifest::VersionManifestV2, mc_version_data::MinecraftVersionData, MinecraftServer,
     },
     ssw_error,
     util::{async_create_dir_if_not_exists, download_file_with_progress},
@@ -77,7 +76,7 @@ pub async fn new_main(args: NewArgs) -> ssw_error::Result<()> {
     let mut mc_server = MinecraftServer::init(server_jar.clone()).await;
     mc_server.ssw_config.to_mut().mc_version = Some(version.id.clone());
     mc_server.save_config().await?;
-    patch_log4j(&mut mc_server).await?;
+    mc_server.patch_log4j().await?;
     info!("Done! Server created at {}", server_jar.display());
     Ok(())
 }

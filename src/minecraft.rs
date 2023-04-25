@@ -1,10 +1,11 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     fs::File,
     io::{self, Write},
     path::{Path, PathBuf},
     process,
-    sync::{Arc, Mutex}, borrow::Cow,
+    sync::{Arc, Mutex},
 };
 
 use chrono::Utc;
@@ -25,9 +26,7 @@ use zip::{write::FileOptions, CompressionMethod, ZipWriter};
 
 use crate::{
     config::{convert_json_to_toml, SswConfig},
-    minecraft::{
-        log4j::patch_log4j, manifest::VersionManifestV2, mc_version_data::MinecraftVersionData,
-    },
+    minecraft::{manifest::VersionManifestV2, mc_version_data::MinecraftVersionData},
     ssw_error,
     util::{create_dir_if_not_exists, get_java_version, path_to_str},
 };
@@ -439,7 +438,7 @@ impl<'a> MinecraftServer<'a> {
                 .into());
             }
         }
-        patch_log4j(self).await?;
+        self.patch_log4j().await?;
         if self.ssw_config.auto_backup {
             info!("Auto-backup enabled, backing up server...");
             if let Err(e) = self.make_backup() {
@@ -460,16 +459,16 @@ impl<'a> MinecraftServer<'a> {
             "nogui",
         ];
         debug!("Running Minecraft server with args: {:?}", proc_args);
+        debug!("Setting server state to Starting");
         {
-            debug!("Setting server state to Starting");
             *self.state.lock().unwrap() = MCServerState::Starting;
-            if let Err(e) = self
-                .server_status_broadcast_channels
-                .0
-                .send(MCServerState::Starting)
-            {
-                error!("Failed to send server status update: {:?}", e);
-            }
+        }
+        if let Err(e) = self
+            .server_status_broadcast_channels
+            .0
+            .send(MCServerState::Starting)
+        {
+            error!("Failed to send server status update: {:?}", e);
         }
         info!("Starting Minecraft server...");
         // use the jar path parent. otherwise, use the current directory. otherwise again, use "."
