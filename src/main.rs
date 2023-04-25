@@ -453,7 +453,7 @@ async fn get_or_set_mc_port(
                 return Err(e.into());
             }
         } else {
-            info!("Successfully set Minecraft port");
+            info!("Successfully set Minecraft port, please restart SSW to apply the changes.");
         }
     } else {
         // this just reports the port that the server is using, it doesn't check validity

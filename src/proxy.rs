@@ -28,7 +28,6 @@ enum ConnectionManagerEvent {
 
 struct ConnectedClient {
     handle: JoinHandle<()>,
-    is_real: bool,
 }
 
 pub struct ProxyConfig<'p> {
@@ -77,6 +76,13 @@ pub async fn run_proxy(
     let listener = TcpListener::bind(&addr).await?;
     debug!("Listening on {}", addr);
 
+    let mc_port = if let Err(e) = ssw_event_tx.send(SswEvent::McPortRequest).await {
+        error!("Failed to request MC port: {}", e);
+        DEFAULT_MC_PORT
+    } else {
+        server_port_rx.recv().await.unwrap_or(DEFAULT_MC_PORT)
+    };
+
     let (connection_manager_tx, connection_manager_rx) =
         tokio::sync::mpsc::channel::<ConnectionManagerEvent>(100);
     let shutdown_timeout = Duration::from_secs_f64(ssw_config.shutdown_timeout * 60.0);
@@ -85,6 +91,7 @@ pub async fn run_proxy(
     let _connection_manager_handle = tokio::spawn(connection_manager(
         connection_manager_rx,
         server_state_rx,
+        format!("127.0.0.1:{}", mc_port),
         ssw_event_tx.clone(),
         connection_manager_token,
         server_state,
@@ -95,13 +102,6 @@ pub async fn run_proxy(
         let (client, client_addr) = listener.accept().await?;
         debug!("Accepted connection from {}", client_addr);
         let connection_handle = {
-            let mc_port = if let Err(e) = ssw_event_tx.send(SswEvent::McPortRequest).await {
-                error!("Failed to request MC port: {}", e);
-                error!("Using default port {}", DEFAULT_MC_PORT);
-                DEFAULT_MC_PORT
-            } else {
-                server_port_rx.recv().await.unwrap_or(DEFAULT_MC_PORT)
-            };
             if mc_port == ssw_config.ssw_port {
                 warn!(
                     "MC port is the same as SSW port, ignoring connection from {}",
@@ -191,6 +191,7 @@ pub async fn run_proxy(
 async fn connection_manager(
     mut connection_manager_rx: mpsc::Receiver<ConnectionManagerEvent>,
     mut server_state_rx: broadcast::Receiver<MCServerState>,
+    server_addr: String,
     ssw_event_tx: mpsc::Sender<SswEvent>,
     cancellation_token: CancellationToken,
     server_state: Arc<Mutex<MCServerState>>,
@@ -200,28 +201,52 @@ async fn connection_manager(
     let mut connections = HashMap::<SocketAddr, ConnectedClient>::new();
     let mut shutdown_task: Option<JoinHandle<()>> = None;
     loop {
-        // unwrap is OK because it will only be checked if `is_none()` returns false (meaning it is Some)
-        if connections.is_empty()
-            && !shutdown_task_duration.is_zero()
-            && (shutdown_task.is_none() || shutdown_task.as_ref().unwrap().is_finished())
-        {
+        if !shutdown_task_duration.is_zero() {
             let current_state = { *server_state.lock().unwrap() };
             if current_state == MCServerState::Running {
-                info!(
-                    "Server is empty, setting shutdown timer for {:.2} minutes",
-                    shutdown_task_duration.as_secs_f64() / 60.0
+                let player_count = mcping::tokio::get_status(mcping::Java {
+                    server_address: server_addr.clone(),
+                    timeout: Some(Duration::from_secs(1)),
+                })
+                .await
+                .map_or_else(
+                    |e| {
+                        warn!("Failed to get server status: {}", e);
+                        0
+                    },
+                    |(latency_ms, status)| {
+                        let player_count = status.players.online;
+                        debug!("Server latency: {}ms", latency_ms);
+                        debug!("Server player count: {}", player_count);
+                        player_count
+                    },
                 );
-                let ssw_event_sender_clone = ssw_event_tx.clone();
-                shutdown_task = Some(tokio::spawn(async move {
-                    tokio::time::sleep(shutdown_task_duration).await;
-                    info!("Server is empty, shutting down");
-                    if let Err(e) = ssw_event_sender_clone
-                        .send(SswEvent::ForceShutdown("No players online".to_owned()))
-                        .await
-                    {
-                        error!("Failed to send shutdown event: {}", e);
+                if player_count == 0 {
+                    // unwrap is OK because it will only be checked if `is_none()` returns false (meaning it is Some)
+                    if shutdown_task.is_none() || shutdown_task.as_ref().unwrap().is_finished() {
+                        info!(
+                            "Server is empty, setting shutdown timer for {:.2} minutes",
+                            shutdown_task_duration.as_secs_f64() / 60.0
+                        );
+                        let ssw_event_sender_clone = ssw_event_tx.clone();
+                        shutdown_task = Some(tokio::spawn(async move {
+                            tokio::time::sleep(shutdown_task_duration).await;
+                            info!("Server is empty, shutting down");
+                            if let Err(e) = ssw_event_sender_clone
+                                .send(SswEvent::ForceShutdown("No players online".to_owned()))
+                                .await
+                            {
+                                error!("Failed to send shutdown event: {}", e);
+                            }
+                        }));
                     }
-                }));
+                } else {
+                    info!("Server is not empty, cancelling shutdown timer");
+                    if let Some(handle) = shutdown_task {
+                        handle.abort();
+                    }
+                    shutdown_task = None;
+                }
             }
         }
         select! {
@@ -232,7 +257,6 @@ async fn connection_manager(
                             if let hash_map::Entry::Vacant(entry) = connections.entry(addr) {
                                 entry.insert(ConnectedClient {
                                     handle,
-                                    is_real: false,
                                 });
                             } else {
                                 // this shouldn't happen
@@ -243,18 +267,7 @@ async fn connection_manager(
                             connections.remove(&addr);
                         }
                         ConnectionManagerEvent::SetReal(addr) => {
-                            if let hash_map::Entry::Occupied(mut entry) = connections.entry(addr) {
-                                entry.get_mut().is_real = true;
-                                if let Some(shutdown_task) = shutdown_task.take() {
-                                    // abort is OK here because sleep is cancelled by just dropping the future
-                                    info!("Player joined, cancelling shutdown timer");
-                                    shutdown_task.abort();
-                                }
-                                shutdown_task = None;
-                            } else {
-                                // this shouldn't happen
-                                warn!("Connection doesn't exist for {}", addr);
-                            }
+                            debug!("Re-checking connection for {}", addr);
                         }
                     }
                     debug!("There are now {} connections", connections.len());
@@ -265,8 +278,15 @@ async fn connection_manager(
             state = server_state_rx.recv() => {
                 // TODO: this is a bit of a hack, but it works for now
                 // forces a re-check of connections if server state changes
-                if let Err(e) = state {
-                    error!("Error waiting for server state: {}", e);
+                // removes all active connections if the server is stopped
+                match state {
+                    Ok(state) => if state == MCServerState::Stopped {
+                        for (addr, client) in connections.drain() {
+                            client.handle.abort();
+                            debug!("Aborted connection to {}", addr);
+                        }
+                    }
+                    Err(e) => error!("Error waiting for server state: {}", e),
                 }
             },
             _ = cancellation_token.cancelled() => {
