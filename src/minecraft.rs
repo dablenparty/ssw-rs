@@ -145,6 +145,7 @@ impl MinecraftServer {
     }
 }
 
+#[derive(Debug)]
 pub enum ServerTaskRequest {
     Start,
     Stop,
@@ -158,6 +159,7 @@ pub fn begin_server_task(
     token: CancellationToken,
 ) -> (JoinHandle<()>, Sender<ServerTaskRequest>) {
     let (server_task_tx, mut server_task_rx) = tokio::sync::mpsc::channel::<ServerTaskRequest>(5);
+    let inner_tx = server_task_tx.clone();
     let task_handle = tokio::spawn(async move {
         let mut server = MinecraftServer::new(jar_path);
         let mut server_exit_handle: Option<JoinHandle<()>> = None;
@@ -215,7 +217,9 @@ pub fn begin_server_task(
                     }
                 }
                 ServerTaskRequest::Restart => {
-                    todo!("Restarting server");
+                    info!("Restarting server");
+                    inner_tx.send(ServerTaskRequest::Stop).await.unwrap();
+                    inner_tx.send(ServerTaskRequest::Start).await.unwrap();
                 }
                 ServerTaskRequest::Kill => {
                     info!("Killing server task");
@@ -243,6 +247,15 @@ pub fn begin_server_task(
                 }
                 ServerTaskRequest::Command(command) => {
                     if let Some(ref senders) = server_senders {
+                        if command.trim_end() == "stop" {
+                            inner_tx
+                                .send(ServerTaskRequest::Stop)
+                                .await
+                                .unwrap_or_else(|e| {
+                                    error!("Error sending stop command to server task: {e}");
+                                });
+                            continue;
+                        }
                         debug!("Sending command to server: {command}");
                         let sender = senders.stdin();
                         if let Err(e) = sender.send(command).await {
