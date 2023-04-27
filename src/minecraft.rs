@@ -1,29 +1,28 @@
 use std::{io, path::PathBuf, process::Stdio};
 
-use crossbeam::channel::Sender;
 use getset::Getters;
 use log::{debug, error, info};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::AsyncWriteExt,
     process::{Child, Command},
-    select,
+    sync::mpsc::Sender,
     task::JoinHandle,
 };
 
 fn pipe_stdin(process: &mut Child) -> (JoinHandle<()>, Sender<String>) {
-    let (stdin_tx, stdin_rx) = crossbeam::channel::unbounded::<String>();
+    let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::channel::<String>(3);
     let mut stdin = process.stdin.take().expect("process stdin is not piped");
     // TODO: cancellation token
     let handle = tokio::spawn(async move {
         loop {
-            match stdin_rx.recv() {
-                Ok(msg) => {
+            match stdin_rx.recv().await {
+                Some(msg) => {
                     if let Err(e) = stdin.write_all(msg.as_bytes()).await {
                         error!("Error writing to process stdin: {e}");
                     }
                 }
-                Err(e) => {
-                    error!("Process stdin closed: {e}");
+                None => {
+                    error!("Process stdin closed");
                     break;
                 }
             };
@@ -106,14 +105,14 @@ pub enum ServerTaskRequest {
 }
 
 pub fn begin_server_task(jar_path: PathBuf) -> (JoinHandle<()>, Sender<ServerTaskRequest>) {
-    let (server_task_tx, server_task_rx) = crossbeam::channel::unbounded::<ServerTaskRequest>();
+    let (server_task_tx, mut server_task_rx) = tokio::sync::mpsc::channel::<ServerTaskRequest>(5);
     let task_handle = tokio::spawn(async move {
         let mut server = MinecraftServer::new(jar_path);
         let mut server_handle = None;
         let mut server_senders = None;
         loop {
-            let message = server_task_rx.recv().unwrap_or_else(|e| {
-                error!("Error receiving message: {e}");
+            let message = server_task_rx.recv().await.unwrap_or_else(|| {
+                error!("Server task channel closed, killing server");
                 ServerTaskRequest::Kill
             });
             match message {
@@ -155,7 +154,7 @@ pub fn begin_server_task(jar_path: PathBuf) -> (JoinHandle<()>, Sender<ServerTas
                     if let Some(ref senders) = server_senders {
                         debug!("Sending command to server: {command}");
                         let sender = senders.stdin();
-                        if let Err(e) = sender.send(command) {
+                        if let Err(e) = sender.send(command).await {
                             error!("Error sending command to server: {e}");
                         }
                     }

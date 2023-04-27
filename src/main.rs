@@ -1,9 +1,8 @@
-use std::{io::BufRead, path::PathBuf};
+use std::path::PathBuf;
 
-use crossbeam::channel::Sender;
 use log::{error, info, LevelFilter};
 use minecraft::{begin_server_task, ServerTaskRequest};
-use tokio::task::JoinHandle;
+use tokio::{io::AsyncBufReadExt, sync::mpsc::Sender, task::JoinHandle};
 
 use crate::logging::init_logging;
 
@@ -31,24 +30,25 @@ async fn main() {
 
 fn begin_stdin_task(server_sender: Sender<ServerTaskRequest>) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let stdin = std::io::stdin();
-        for line in stdin.lock().lines() {
-            let line = match line {
-                Ok(l) => l,
-                Err(e) => {
-                    error!("Error reading from stdin: {e}");
+        let stdin = tokio::io::stdin();
+        let mut stdin_reader = tokio::io::BufReader::new(stdin).lines();
+        loop {
+            let line = match stdin_reader.next_line().await.unwrap() {
+                Some(l) => l,
+                None => {
+                    error!("Error reading from stdin, most likely closed");
                     break;
                 }
             };
 
             match line.as_str() {
                 "start" => {
-                    if let Err(e) = server_sender.send(ServerTaskRequest::Start) {
+                    if let Err(e) = server_sender.send(ServerTaskRequest::Start).await {
                         error!("Error sending start request: {e}");
                     }
                 }
                 _ => {
-                    if let Err(e) = server_sender.send(ServerTaskRequest::Command(line)) {
+                    if let Err(e) = server_sender.send(ServerTaskRequest::Command(line)).await {
                         error!("Error sending command to server: {e}");
                     }
                 }
