@@ -98,29 +98,12 @@ impl MinecraftServer {
         let mut process = Command::new(java_executable)
             .current_dir(wd)
             .args(process_args)
-            .stderr(Stdio::piped())
             .stdin(Stdio::piped())
-            // .stdout(Stdio::piped())
             .spawn()?;
         let proc_stdin_token = CancellationToken::new();
         let (stdin_handle, stdin_sender) = pipe_stdin(&mut process, proc_stdin_token.clone());
 
-        let stderr_handle = {
-            let mut stderr = process.stderr.take().expect("process stderr is not piped");
-            tokio::spawn(async move {
-                // copy stderr to stdout
-                if let Err(e) = tokio::io::copy(&mut stderr, &mut tokio::io::stdout()).await {
-                    error!("Error copying process stderr to stdout: {e}");
-                };
-            })
-        };
-
-        // TODO: pipe AND MONITOR stdout with regexes
-
-        let handles = vec![
-            (stdin_handle, Some(proc_stdin_token)),
-            (stderr_handle, None),
-        ];
+        let handles = vec![(stdin_handle, Some(proc_stdin_token))];
 
         let senders = MinecraftServerSenders {
             stdin: stdin_sender,
