@@ -147,17 +147,12 @@ impl MinecraftServer<'_> {
         let min_mem_arg = format!("-Xms{min_memory_in_mb}M");
         let max_mem_arg = format!("-Xmx{max_memory_in_mb}M");
 
-        let process_args = vec![
-            min_mem_arg.as_str(),
-            max_mem_arg.as_str(),
-            "-jar",
-            self.jar_path.to_str().unwrap(),
-            "nogui",
-        ];
+        let mut process_args = vec![min_mem_arg.as_str(), max_mem_arg.as_str()];
+        process_args.extend(config.extra_jvm_args().iter().map(|s| s.as_str()));
+        process_args.extend(vec!["-jar", self.jar_path.to_str().unwrap(), "nogui"]);
+
         let wd = self.jar_path.parent().unwrap();
-        // TODO: extend process_args with extra args from config
         debug!("Starting process with args: {:?}", process_args);
-        // TODO: set state to starting
         let mut process = Command::new(java_executable)
             .current_dir(wd)
             .args(process_args)
@@ -184,7 +179,6 @@ impl MinecraftServer<'_> {
                     error!("Error waiting on child task: {e}");
                 }
             }
-            // TODO: set state to stopped
         });
 
         Ok((exit_handle, senders))
