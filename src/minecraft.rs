@@ -191,11 +191,13 @@ pub enum ServerTaskRequest {
     Stop,
     Restart,
     Kill,
+    IsRunning,
     Command(String),
 }
 
 pub fn begin_server_task(
     jar_path: PathBuf,
+    running_tx: Sender<bool>,
     token: CancellationToken,
 ) -> (JoinHandle<()>, Sender<ServerTaskRequest>) {
     let (server_task_tx, mut server_task_rx) = tokio::sync::mpsc::channel::<ServerTaskRequest>(5);
@@ -227,6 +229,7 @@ pub fn begin_server_task(
                         continue;
                     }
                     info!("Starting server");
+
                     (server_exit_handle, server_senders) = match server.start().await {
                         Ok((handle, senders)) => (Some(handle), Some(senders)),
                         Err(e) => {
@@ -302,6 +305,12 @@ pub fn begin_server_task(
                             error!("Error sending command to server: {e}");
                         }
                     }
+                }
+                ServerTaskRequest::IsRunning => {
+                    running_tx
+                        .send(server_is_running)
+                        .await
+                        .unwrap_or_else(|e| error!("Error sending running status to UI: {e}"));
                 }
             }
         }

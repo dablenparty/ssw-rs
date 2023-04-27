@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use log::{error, info, warn, LevelFilter};
+use log::{debug, error, info, warn, LevelFilter};
 use minecraft::{begin_server_task, ServerTaskRequest};
 use tokio::{io::AsyncBufReadExt, select, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
@@ -21,9 +21,11 @@ async fn main() {
     // TODO: clap args
     let jar_path = PathBuf::from("mc-server/server.jar");
     let server_token = CancellationToken::new();
-    let (server_handle, server_sender) = begin_server_task(jar_path, server_token.clone());
+    let (running_tx, running_rx) = tokio::sync::mpsc::channel(1);
+    let (server_handle, server_sender) =
+        begin_server_task(jar_path, running_tx, server_token.clone());
     let stdin_token = CancellationToken::new();
-    let stdin_handle = begin_stdin_task(server_sender, stdin_token);
+    let stdin_handle = begin_stdin_task(server_sender, running_rx, stdin_token);
     stdin_handle.await.unwrap_or_else(|e| {
         error!("Error waiting on stdin task: {e}");
     });
@@ -38,6 +40,7 @@ async fn main() {
 
 fn begin_stdin_task(
     server_sender: Sender<ServerTaskRequest>,
+    mut running_rx: tokio::sync::mpsc::Receiver<bool>,
     token: CancellationToken,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -80,6 +83,16 @@ fn begin_stdin_task(
                 }
                 _ => {
                     // TODO: check status and only send command if server is running
+                    server_sender
+                        .send(ServerTaskRequest::IsRunning)
+                        .await
+                        .unwrap_or_else(|e| {
+                            error!("Error sending is_running request: {e}");
+                        });
+                    if !running_rx.recv().await.unwrap_or(false) {
+                        debug!("Server is not running, ignoring command");
+                        continue;
+                    }
                     if let Err(e) = server_sender.send(ServerTaskRequest::Command(line)).await {
                         error!("Error sending command to server: {e}");
                     }
