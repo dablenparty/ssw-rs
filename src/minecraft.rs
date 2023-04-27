@@ -16,7 +16,6 @@ mod restart_task;
 fn pipe_stdin(process: &mut Child, token: CancellationToken) -> (JoinHandle<()>, Sender<String>) {
     let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::channel::<String>(3);
     let mut stdin = process.stdin.take().expect("process stdin is not piped");
-    // TODO: cancellation token
     let handle = tokio::spawn(async move {
         loop {
             select! {
@@ -78,12 +77,12 @@ impl MinecraftServer {
         // TODO: load server.properties and set the port from there
         let port = DEFAULT_MINECRAFT_PORT;
         // TODO: patch Log4Shell
-        info!("Starting Minecraft server on port {}", port);
+        info!("Starting Minecraft server on port {port}");
         // TODO: load these from config
         let min_memory_in_mb = 256;
         let max_memory_in_mb = 1024;
-        let min_mem_arg = format!("-Xms{}M", min_memory_in_mb);
-        let max_mem_arg = format!("-Xmx{}M", max_memory_in_mb);
+        let min_mem_arg = format!("-Xms{min_memory_in_mb}M");
+        let max_mem_arg = format!("-Xmx{max_memory_in_mb}M");
 
         let process_args = vec![
             min_mem_arg.as_str(),

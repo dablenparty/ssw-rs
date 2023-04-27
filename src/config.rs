@@ -17,8 +17,10 @@ pub enum SswConfigError {
 pub struct SswConfig<'s> {
     /// Extra JVM arguments to pass to the server
     extra_jvm_args: Cow<'s, Vec<String>>,
-    /// The amount of memory to allocate to the server in MB
-    memory_in_mb: usize,
+    /// The minimum amount of memory to allocate to the server in MB
+    min_memory_in_mb: usize,
+    /// The maximum amount of memory to allocate to the server in MB
+    max_memory_in_mb: usize,
     /// The version of Minecraft to run. This is used to determine how to patch Log4Shell.
     mc_version: Option<Cow<'s, str>>,
     /// The number of hours to wait before restarting the server (set to 0 to disable)
@@ -31,7 +33,8 @@ impl Default for SswConfig<'_> {
     fn default() -> Self {
         Self {
             extra_jvm_args: Cow::Owned(vec![]),
-            memory_in_mb: 1024,
+            min_memory_in_mb: 256,
+            max_memory_in_mb: 1024,
             mc_version: None,
             restart_after_hrs: 12.0,
             shutdown_after_mins: 5.0,
