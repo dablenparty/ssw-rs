@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io, path::PathBuf, process::Stdio};
+use std::{io, path::PathBuf, process::Stdio};
 
 use getset::Getters;
 use java_properties::PropertiesIter;
@@ -53,8 +53,6 @@ fn pipe_stdin(process: &mut Child, token: CancellationToken) -> (JoinHandle<()>,
     (handle, stdin_tx)
 }
 
-type ServerProperties = HashMap<String, String>;
-
 #[derive(Getters)]
 #[get = "pub"]
 struct MinecraftServerSenders {
@@ -86,23 +84,35 @@ impl MinecraftServer<'_> {
         }
     }
 
-    fn load_properties(&self) -> Result<ServerProperties, MinecraftServerError> {
+    /// Get the port the server is running on from the server.properties file
+    /// If the file does not exist, or the port is not set, the default Minecraft port `25565`
+    /// is returned.
+    pub fn get_port(&self) -> u16 {
+        const DEFAULT_MINECRAFT_PORT: u16 = 25565;
         let properties_path = self.jar_path.with_file_name("server.properties");
-        if properties_path.exists() {
-            // properties file reader
-            let properties_file = std::fs::File::open(properties_path)?;
-            let mut properties_reader = std::io::BufReader::new(properties_file);
-            let properties = java_properties::read(&mut properties_reader)?;
-            Ok(properties)
-        } else {
-            Ok(ServerProperties::default())
-        }
+        std::fs::File::open(properties_path).map_or(DEFAULT_MINECRAFT_PORT, |f| {
+            let properties_reader = std::io::BufReader::new(f);
+            PropertiesIter::new(properties_reader)
+                .into_iter()
+                .find_map(|r| {
+                    if let Ok(line) = r {
+                        match line.consume_content() {
+                            java_properties::LineContent::KVPair(k, v) if k == "server-port" => {
+                                v.parse().ok()
+                            }
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(DEFAULT_MINECRAFT_PORT)
+        })
     }
 
     async fn start(
         &mut self,
     ) -> Result<(JoinHandle<()>, MinecraftServerSenders), MinecraftServerError> {
-        const DEFAULT_MINECRAFT_PORT: u16 = 25565;
         debug!("Jar path: {}", self.jar_path.display());
         // TODO: get java executable
         // this will be a PathBuf or &Path
@@ -123,21 +133,15 @@ impl MinecraftServer<'_> {
             self.config = Some(config);
             self.config.as_ref().unwrap()
         };
+        debug!("Loaded config: {config:#?}");
         // TODO: try to read the minecraft version from the jar manifest
         if config.mc_version().is_none() {
             error!("The Minecraft version is not set in the config");
             return Err(crate::config::SswConfigError::MissingMinecraftVersion)?;
         }
         // TODO: check if the java version is valid for the server version
-        let properties = self.load_properties()?;
-        let port: u16 = properties
-            .get("server-port")
-            .map_or(DEFAULT_MINECRAFT_PORT, |s| {
-                s.parse().unwrap_or(DEFAULT_MINECRAFT_PORT)
-            });
         // TODO: patch Log4Shell
-        info!("Starting Minecraft server on port {port}");
-        // TODO: load these from config
+        info!("Starting Minecraft server on port {}", self.get_port());
         let min_memory_in_mb = *config.min_memory_in_mb();
         let max_memory_in_mb = *config.max_memory_in_mb();
         let min_mem_arg = format!("-Xms{min_memory_in_mb}M");
