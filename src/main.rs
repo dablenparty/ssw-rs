@@ -9,6 +9,7 @@ use crate::logging::init_logging;
 
 mod logging;
 mod minecraft;
+mod config;
 
 #[tokio::main]
 async fn main() {

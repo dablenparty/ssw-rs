@@ -11,6 +11,8 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+mod restart_task;
+
 fn pipe_stdin(process: &mut Child, token: CancellationToken) -> (JoinHandle<()>, Sender<String>) {
     let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::channel::<String>(3);
     let mut stdin = process.stdin.take().expect("process stdin is not piped");
@@ -149,7 +151,6 @@ pub enum ServerTaskRequest {
     Stop,
     Restart,
     Kill,
-    Status,
     Command(String),
 }
 
@@ -240,9 +241,6 @@ pub fn begin_server_task(
                             error!("Error waiting for server to stop: {e}");
                         }
                     }
-                }
-                ServerTaskRequest::Status => {
-                    todo!("Getting server status");
                 }
                 ServerTaskRequest::Command(command) => {
                     if let Some(ref senders) = server_senders {

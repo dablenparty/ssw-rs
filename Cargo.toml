@@ -14,10 +14,14 @@ bench = false
 [dependencies]
 chrono = { version = "0.4.24", features = ["serde"] }
 dirs = "5.0.0"
+duration-string = "0.3.0"
 flate2 = "1.0.25"
 getset = "0.1.2"
 log = "0.4.17"
+serde = { version = "1.0.160", features = ["derive"] }
+serde_json = "1.0.96"
 simplelog = { version = "0.12.1", features = ["paris"] }
 thiserror = "1.0.40"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7.8"
+toml = "0.7.3"
