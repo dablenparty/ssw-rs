@@ -1,6 +1,7 @@
-use std::{io, path::PathBuf, process::Stdio};
+use std::{collections::HashMap, io, path::PathBuf, process::Stdio};
 
 use getset::Getters;
+use java_properties::PropertiesIter;
 use log::{debug, error, info, warn};
 use thiserror::Error;
 use tokio::{
@@ -52,6 +53,8 @@ fn pipe_stdin(process: &mut Child, token: CancellationToken) -> (JoinHandle<()>,
     (handle, stdin_tx)
 }
 
+type ServerProperties = HashMap<String, String>;
+
 #[derive(Getters)]
 #[get = "pub"]
 struct MinecraftServerSenders {
@@ -65,6 +68,8 @@ pub enum MinecraftServerError {
     StartFailed(#[from] io::Error),
     #[error("Config error: {0}")]
     SswConfigError(#[from] crate::config::SswConfigError),
+    #[error("Failed to read server.properties: {0}")]
+    ServerPropertiesError(#[from] java_properties::PropertiesError),
 }
 
 pub struct MinecraftServer<'m> {
@@ -78,6 +83,19 @@ impl MinecraftServer<'_> {
         Self {
             jar_path,
             config: None,
+        }
+    }
+
+    fn load_properties(&self) -> Result<ServerProperties, MinecraftServerError> {
+        let properties_path = self.jar_path.with_file_name("server.properties");
+        if properties_path.exists() {
+            // properties file reader
+            let properties_file = std::fs::File::open(properties_path)?;
+            let mut properties_reader = std::io::BufReader::new(properties_file);
+            let properties = java_properties::read(&mut properties_reader)?;
+            Ok(properties)
+        } else {
+            Ok(ServerProperties::default())
         }
     }
 
@@ -111,8 +129,12 @@ impl MinecraftServer<'_> {
             return Err(crate::config::SswConfigError::MissingMinecraftVersion)?;
         }
         // TODO: check if the java version is valid for the server version
-        // TODO: load server.properties and set the port from there
-        let port = DEFAULT_MINECRAFT_PORT;
+        let properties = self.load_properties()?;
+        let port: u16 = properties
+            .get("server-port")
+            .map_or(DEFAULT_MINECRAFT_PORT, |s| {
+                s.parse().unwrap_or(DEFAULT_MINECRAFT_PORT)
+            });
         // TODO: patch Log4Shell
         info!("Starting Minecraft server on port {port}");
         // TODO: load these from config

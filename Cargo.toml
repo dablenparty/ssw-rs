@@ -18,6 +18,7 @@ dunce = "1.0.4"
 duration-string = "0.3.0"
 flate2 = "1.0.25"
 getset = "0.1.2"
+java-properties = "1.4.1"
 log = "0.4.17"
 serde = { version = "1.0.160", features = ["derive"] }
 serde_json = "1.0.96"
