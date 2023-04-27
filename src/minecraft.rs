@@ -63,7 +63,7 @@ pub struct MinecraftServer {
 
 impl MinecraftServer {
     pub fn new(jar_path: PathBuf) -> Self {
-        let jar_path = jar_path.canonicalize().unwrap_or(jar_path);
+        let jar_path = dunce::canonicalize(&jar_path).unwrap_or(jar_path);
         Self { jar_path }
     }
 
