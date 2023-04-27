@@ -1,4 +1,7 @@
-use std::{borrow::Cow, path::Path};
+use std::{
+    borrow::Cow,
+    path::{Path, PathBuf},
+};
 
 use getset::{Getters, MutGetters, Setters};
 use serde::{Deserialize, Serialize};
@@ -8,8 +11,12 @@ use thiserror::Error;
 pub enum SswConfigError {
     #[error("Failed to parse config: {0}")]
     ParseError(#[from] toml::de::Error),
+    #[error("Failed to serialize config: {0}")]
+    SerializeError(#[from] toml::ser::Error),
     #[error("Failed to read config: {0}")]
     IoError(#[from] std::io::Error),
+    #[error("mc_version is not set in config")]
+    MissingMinecraftVersion,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Getters, MutGetters, Setters)]
@@ -32,7 +39,14 @@ pub struct SswConfig<'s> {
 impl Default for SswConfig<'_> {
     fn default() -> Self {
         Self {
-            extra_jvm_args: Cow::Owned(vec![]),
+            extra_jvm_args: Cow::Owned(vec![
+                "-XX:+UnlockExperimentalVMOptions".into(),
+                "-XX:+UseG1GC".into(),
+                "-XX:G1NewSizePercent=20".into(),
+                "-XX:G1ReservePercent=20".into(),
+                "-XX:MaxGCPauseMillis=50".into(),
+                "-XX:G1HeapRegionSize=32M".into(),
+            ]),
             min_memory_in_mb: 256,
             max_memory_in_mb: 1024,
             mc_version: None,
@@ -42,20 +56,28 @@ impl Default for SswConfig<'_> {
     }
 }
 
-impl<'s> SswConfig<'s> {
-    /// Attempts to asynchronously load a config from the given path.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - The path-like to load the config from
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if the file cannot be read or if the file cannot be parsed.
-    pub async fn try_from_path<P: AsRef<Path>>(path: P) -> Result<SswConfig<'s>, SswConfigError> {
-        let path = path.as_ref();
-        let config = tokio::fs::read_to_string(path).await?;
+impl TryFrom<PathBuf> for SswConfig<'_> {
+    type Error = SswConfigError;
+
+    fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
+        Self::try_from(path.as_path())
+    }
+}
+
+impl TryFrom<&Path> for SswConfig<'_> {
+    type Error = SswConfigError;
+
+    fn try_from(path: &Path) -> Result<Self, Self::Error> {
+        let config = std::fs::read_to_string(path)?;
         let config = toml::from_str(&config)?;
         Ok(config)
+    }
+}
+
+impl<'s> SswConfig<'s> {
+    pub async fn save(&self, path: &Path) -> Result<(), SswConfigError> {
+        let config = toml::to_string_pretty(self)?;
+        tokio::fs::write(path, config).await?;
+        Ok(())
     }
 }

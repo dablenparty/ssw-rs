@@ -7,9 +7,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::logging::init_logging;
 
+mod config;
 mod logging;
 mod minecraft;
-mod config;
 
 #[tokio::main]
 async fn main() {

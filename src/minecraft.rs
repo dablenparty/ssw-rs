@@ -2,6 +2,7 @@ use std::{io, path::PathBuf, process::Stdio};
 
 use getset::Getters;
 use log::{debug, error, info, warn};
+use thiserror::Error;
 use tokio::{
     io::AsyncWriteExt,
     process::{Child, Command},
@@ -10,6 +11,8 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
+
+use crate::config::SswConfig;
 
 mod restart_task;
 
@@ -56,31 +59,65 @@ struct MinecraftServerSenders {
     // state
 }
 
-pub struct MinecraftServer {
-    jar_path: PathBuf,
+#[derive(Debug, Error)]
+pub enum MinecraftServerError {
+    #[error("Failed to start Minecraft server: {0}")]
+    StartFailed(#[from] io::Error),
+    #[error("Config error: {0}")]
+    SswConfigError(#[from] crate::config::SswConfigError),
 }
 
-impl MinecraftServer {
+pub struct MinecraftServer<'m> {
+    jar_path: PathBuf,
+    config: Option<SswConfig<'m>>,
+}
+
+impl MinecraftServer<'_> {
     pub fn new(jar_path: PathBuf) -> Self {
         let jar_path = dunce::canonicalize(&jar_path).unwrap_or(jar_path);
-        Self { jar_path }
+        Self {
+            jar_path,
+            config: None,
+        }
     }
 
-    fn start(&mut self) -> io::Result<(JoinHandle<()>, MinecraftServerSenders)> {
+    async fn start(
+        &mut self,
+    ) -> Result<(JoinHandle<()>, MinecraftServerSenders), MinecraftServerError> {
         const DEFAULT_MINECRAFT_PORT: u16 = 25565;
         debug!("Jar path: {}", self.jar_path.display());
         // TODO: get java executable
         // this will be a PathBuf or &Path
         let java_executable = "java";
-        // TODO: check if the java version is valid for the server version
         // TODO: load config
+        let config = {
+            let config_path = self.jar_path.with_file_name("ssw-config.toml");
+            let config = if self.config.is_some() || config_path.exists() {
+                SswConfig::try_from(config_path).unwrap_or_else(|e| {
+                    error!("Error loading config: {e}");
+                    SswConfig::default()
+                })
+            } else {
+                let config = SswConfig::default();
+                config.save(&config_path).await?;
+                config
+            };
+            self.config = Some(config);
+            self.config.as_ref().unwrap()
+        };
+        // TODO: try to read the minecraft version from the jar manifest
+        if config.mc_version().is_none() {
+            error!("The Minecraft version is not set in the config");
+            return Err(crate::config::SswConfigError::MissingMinecraftVersion)?;
+        }
+        // TODO: check if the java version is valid for the server version
         // TODO: load server.properties and set the port from there
         let port = DEFAULT_MINECRAFT_PORT;
         // TODO: patch Log4Shell
         info!("Starting Minecraft server on port {port}");
         // TODO: load these from config
-        let min_memory_in_mb = 256;
-        let max_memory_in_mb = 1024;
+        let min_memory_in_mb = *config.min_memory_in_mb();
+        let max_memory_in_mb = *config.max_memory_in_mb();
         let min_mem_arg = format!("-Xms{min_memory_in_mb}M");
         let max_mem_arg = format!("-Xmx{max_memory_in_mb}M");
 
@@ -170,7 +207,7 @@ pub fn begin_server_task(
                         continue;
                     }
                     info!("Starting server");
-                    (server_exit_handle, server_senders) = match server.start() {
+                    (server_exit_handle, server_senders) = match server.start().await {
                         Ok((handle, senders)) => (Some(handle), Some(senders)),
                         Err(e) => {
                             error!("Error starting server: {e}");
