@@ -1,32 +1,49 @@
 use std::{io, path::PathBuf, process::Stdio};
 
 use getset::Getters;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use tokio::{
     io::AsyncWriteExt,
     process::{Child, Command},
+    select,
     sync::mpsc::Sender,
     task::JoinHandle,
 };
+use tokio_util::sync::CancellationToken;
 
-fn pipe_stdin(process: &mut Child) -> (JoinHandle<()>, Sender<String>) {
+fn pipe_stdin(process: &mut Child, token: CancellationToken) -> (JoinHandle<()>, Sender<String>) {
     let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::channel::<String>(3);
     let mut stdin = process.stdin.take().expect("process stdin is not piped");
     // TODO: cancellation token
     let handle = tokio::spawn(async move {
         loop {
-            match stdin_rx.recv().await {
-                Some(msg) => {
-                    if let Err(e) = stdin.write_all(msg.as_bytes()).await {
-                        error!("Error writing to process stdin: {e}");
+            select! {
+                o = stdin_rx.recv() => {
+                    if let Some(mut msg) = o {
+                        debug!("Sending message to process stdin: {msg}");
+                        if !msg.ends_with('\n') {
+                            msg.push('\n');
+                        }
+                        if let Err(e) = stdin.write_all(msg.as_bytes()).await {
+                            error!("Error writing to process stdin: {e}");
+                        }
+                        stdin.flush().await.unwrap_or_else(|e| {
+                            error!("Error flushing process stdin: {e}");
+                        });
+                    } else {
+                        error!("Process stdin closed");
+                        break;
                     }
                 }
-                None => {
-                    error!("Process stdin closed");
+                _ = token.cancelled() => {
+                    info!("Process stdin pipe cancelled");
                     break;
                 }
-            };
+            }
         }
+        stdin.shutdown().await.unwrap_or_else(|e| {
+            error!("Error shutting down process stdin: {e}");
+        });
     });
     (handle, stdin_tx)
 }
@@ -48,7 +65,7 @@ impl MinecraftServer {
         Self { jar_path }
     }
 
-    fn start(&mut self) -> io::Result<(Child, MinecraftServerSenders)> {
+    fn start(&mut self) -> io::Result<(JoinHandle<()>, MinecraftServerSenders)> {
         const DEFAULT_MINECRAFT_PORT: u16 = 25565;
         debug!("Jar path: {}", self.jar_path.display());
         // TODO: get java executable
@@ -80,18 +97,50 @@ impl MinecraftServer {
         let mut process = Command::new(java_executable)
             .current_dir(wd)
             .args(process_args)
-            // .stderr(Stdio::piped())
+            .stderr(Stdio::piped())
             .stdin(Stdio::piped())
             // .stdout(Stdio::piped())
             .spawn()?;
-        // TODO: start stdin pipe
-        let (stdin_handle, stdin_sender) = pipe_stdin(&mut process);
+        let proc_stdin_token = CancellationToken::new();
+        let (stdin_handle, stdin_sender) = pipe_stdin(&mut process, proc_stdin_token.clone());
+
+        let stderr_handle = {
+            let mut stderr = process.stderr.take().expect("process stderr is not piped");
+            tokio::spawn(async move {
+                // copy stderr to stdout
+                if let Err(e) = tokio::io::copy(&mut stderr, &mut tokio::io::stdout()).await {
+                    error!("Error copying process stderr to stdout: {e}");
+                };
+            })
+        };
+
+        // TODO: pipe AND MONITOR stdout with regexes
+
+        let handles = vec![
+            (stdin_handle, Some(proc_stdin_token)),
+            (stderr_handle, None),
+        ];
 
         let senders = MinecraftServerSenders {
             stdin: stdin_sender,
         };
 
-        Ok((process, senders))
+        let exit_handle = tokio::spawn(async move {
+            if let Err(e) = process.wait().await {
+                error!("Error waiting for server process: {e}");
+            }
+            for (handle, token) in handles {
+                if let Some(token) = token {
+                    token.cancel();
+                }
+                if let Err(e) = handle.await {
+                    error!("Error waiting on child task: {e}");
+                }
+            }
+            // TODO: set state to stopped
+        });
+
+        Ok((exit_handle, senders))
     }
 }
 
@@ -104,34 +153,40 @@ pub enum ServerTaskRequest {
     Command(String),
 }
 
-pub fn begin_server_task(jar_path: PathBuf) -> (JoinHandle<()>, Sender<ServerTaskRequest>) {
+pub fn begin_server_task(
+    jar_path: PathBuf,
+    token: CancellationToken,
+) -> (JoinHandle<()>, Sender<ServerTaskRequest>) {
     let (server_task_tx, mut server_task_rx) = tokio::sync::mpsc::channel::<ServerTaskRequest>(5);
     let task_handle = tokio::spawn(async move {
         let mut server = MinecraftServer::new(jar_path);
-        let mut server_handle = None;
+        let mut server_exit_handle: Option<JoinHandle<()>> = None;
         let mut server_senders = None;
         loop {
-            let message = server_task_rx.recv().await.unwrap_or_else(|| {
-                error!("Server task channel closed, killing server");
-                ServerTaskRequest::Kill
-            });
+            let message = select! {
+                r = server_task_rx.recv() => {
+                    r.unwrap_or_else(|| {
+                        warn!("Server task channel closed, killing server");
+                        ServerTaskRequest::Kill
+                    })
+                }
+                _ = token.cancelled() => {
+                    info!("Server message task cancelled");
+                    break;
+                }
+            };
+            let server_is_running = !server_exit_handle
+                .as_ref()
+                .map_or(true, |f| f.is_finished());
             match message {
                 ServerTaskRequest::Start => {
-                    if server_handle.is_some() {
+                    if server_is_running {
                         error!("Server is already running");
                         continue;
                     }
                     info!("Starting server");
-                    (server_handle, server_senders) = match server.start() {
-                        Ok((mut child, senders)) => {
-                            let handle = tokio::spawn(async move {
-                                if let Err(e) = child.wait().await {
-                                    error!("Error waiting for server process: {e}");
-                                }
-                                // TODO: set state to stopped
-                            });
-                            (Some(handle), Some(senders))
-                        }
+                    (server_exit_handle, server_senders) = match server.start() {
+                        Ok((handle, senders)) => (Some(handle), Some(senders)),
                         Err(e) => {
                             error!("Error starting server: {e}");
                             continue;
@@ -139,13 +194,52 @@ pub fn begin_server_task(jar_path: PathBuf) -> (JoinHandle<()>, Sender<ServerTas
                     };
                 }
                 ServerTaskRequest::Stop => {
-                    todo!("Stopping server");
+                    if !server_is_running {
+                        warn!("Requested to stop server, but it is not running");
+                        continue;
+                    }
+                    if let Some(ref senders) = server_senders {
+                        info!("Server is running, stopping it");
+                        let sender = senders.stdin();
+                        if let Err(e) = sender.send("stop".to_string()).await {
+                            error!("Error sending stop command to server: {e}");
+                        }
+                    }
+                    if let Some(handle) = server_exit_handle.take() {
+                        info!(
+                            "Waiting for server to stop (if this takes too long, kill it manually)"
+                        );
+                        if let Err(e) = handle.await {
+                            error!("Error waiting for server to stop: {e}");
+                        }
+                    }
                 }
                 ServerTaskRequest::Restart => {
                     todo!("Restarting server");
                 }
                 ServerTaskRequest::Kill => {
-                    todo!("Killing server");
+                    info!("Killing server task");
+                    if !server_is_running {
+                        debug!("Minecraft server not running, skipping stop command");
+                        token.cancel();
+                        break;
+                    }
+                    // send stop command
+                    if let Some(ref senders) = server_senders {
+                        info!("Server is still running, stopping it");
+                        let sender = senders.stdin();
+                        if let Err(e) = sender.send("stop".to_string()).await {
+                            error!("Error sending stop command to server: {e}");
+                        }
+                    }
+                    if let Some(handle) = server_exit_handle.take() {
+                        info!(
+                            "Waiting for server to stop (if this takes too long, kill it manually)"
+                        );
+                        if let Err(e) = handle.await {
+                            error!("Error waiting for server to stop: {e}");
+                        }
+                    }
                 }
                 ServerTaskRequest::Status => {
                     todo!("Getting server status");

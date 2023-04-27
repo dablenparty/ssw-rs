@@ -20,3 +20,4 @@ log = "0.4.17"
 simplelog = { version = "0.12.1", features = ["paris"] }
 thiserror = "1.0.40"
 tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7.8"
