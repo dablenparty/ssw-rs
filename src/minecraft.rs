@@ -1,4 +1,4 @@
-use std::{io, path::PathBuf, process::Stdio};
+use std::{io, path::PathBuf, process::Stdio, time::Duration};
 
 use getset::Getters;
 use java_properties::PropertiesIter;
@@ -14,6 +14,8 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::config::SswConfig;
+
+use self::restart_task::begin_restart_task;
 
 mod restart_task;
 
@@ -112,6 +114,7 @@ impl MinecraftServer<'_> {
 
     async fn start(
         &mut self,
+        restart_token: CancellationToken,
     ) -> Result<(JoinHandle<()>, MinecraftServerSenders), MinecraftServerError> {
         debug!("Jar path: {}", self.jar_path.display());
         // TODO: get java executable
@@ -148,7 +151,12 @@ impl MinecraftServer<'_> {
         let max_mem_arg = format!("-Xmx{max_memory_in_mb}M");
 
         let mut process_args = vec![min_mem_arg.as_str(), max_mem_arg.as_str()];
-        process_args.extend(config.extra_jvm_args().iter().map(|s| s.as_str()));
+        process_args.extend(
+            config
+                .extra_jvm_args()
+                .iter()
+                .map(std::string::String::as_str),
+        );
         process_args.extend(vec!["-jar", self.jar_path.to_str().unwrap(), "nogui"]);
 
         let wd = self.jar_path.parent().unwrap();
@@ -159,7 +167,7 @@ impl MinecraftServer<'_> {
             .stdin(Stdio::piped())
             .spawn()?;
         let proc_stdin_token = CancellationToken::new();
-        let (stdin_handle, stdin_sender) = pipe_stdin(&mut process, proc_stdin_token.clone());
+        let (stdin_handle, stdin_sender) = pipe_stdin(&mut process, proc_stdin_token.child_token());
 
         let handles = vec![(stdin_handle, Some(proc_stdin_token))];
 
@@ -171,6 +179,7 @@ impl MinecraftServer<'_> {
             if let Err(e) = process.wait().await {
                 error!("Error waiting for server process: {e}");
             }
+            restart_token.cancel();
             for (handle, token) in handles {
                 if let Some(token) = token {
                     token.cancel();
@@ -185,7 +194,7 @@ impl MinecraftServer<'_> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ServerTaskRequest {
     Start,
     Stop,
@@ -195,6 +204,15 @@ pub enum ServerTaskRequest {
     Command(String),
 }
 
+/// Begins the server task, which will start the server and handle all requests to it.
+/// Returns a handle to the task, and a channel to send requests to the task.
+/// The task will exit when the Kill request is sent.
+///
+/// # Arguments
+///
+/// * `jar_path` - The path to the server jar file
+/// * `running_tx` - A channel to send a boolean representing the running status of the server
+/// * `token` - A cancellation token that will be cancelled when the server task exits
 pub fn begin_server_task(
     jar_path: PathBuf,
     running_tx: Sender<bool>,
@@ -204,6 +222,9 @@ pub fn begin_server_task(
     let inner_tx = server_task_tx.clone();
     let task_handle = tokio::spawn(async move {
         let mut server = MinecraftServer::new(jar_path);
+        let config = server.config.clone().unwrap_or_default();
+        let mut restart_handle = None;
+        let restart_token = token.child_token();
         let mut server_exit_handle: Option<JoinHandle<()>> = None;
         let mut server_senders = None;
         loop {
@@ -221,26 +242,35 @@ pub fn begin_server_task(
             };
             let server_is_running = !server_exit_handle
                 .as_ref()
-                .map_or(true, |f| f.is_finished());
+                .map_or(true, tokio::task::JoinHandle::is_finished);
+            debug!("Received server task message: {message:?}");
             match message {
                 ServerTaskRequest::Start => {
                     if server_is_running {
-                        error!("Server is already running");
+                        warn!("Server is already running");
                         continue;
                     }
-                    info!("Starting server");
-
-                    (server_exit_handle, server_senders) = match server.start().await {
-                        Ok((handle, senders)) => (Some(handle), Some(senders)),
+                    (server_exit_handle, server_senders) = match server
+                        .start(restart_token.clone())
+                        .await
+                    {
+                        Ok((handle, senders)) => {
+                            restart_handle =
+                                maybe_start_restart_task(&config, &inner_tx, restart_token.clone());
+                            (Some(handle), Some(senders))
+                        }
                         Err(e) => {
                             error!("Error starting server: {e}");
                             continue;
                         }
                     };
                 }
-                ServerTaskRequest::Stop => {
+                ServerTaskRequest::Kill | ServerTaskRequest::Stop => {
                     if !server_is_running {
                         warn!("Requested to stop server, but it is not running");
+                        if message == ServerTaskRequest::Kill {
+                            token.cancel();
+                        }
                         continue;
                     }
                     if let Some(ref senders) = server_senders {
@@ -251,55 +281,18 @@ pub fn begin_server_task(
                         }
                     }
                     if let Some(handle) = server_exit_handle.take() {
-                        info!(
-                            "Waiting for server to stop (if this takes too long, kill it manually)"
-                        );
+                        info!("Waiting for server to stop");
                         if let Err(e) = handle.await {
                             error!("Error waiting for server to stop: {e}");
                         }
                     }
                 }
                 ServerTaskRequest::Restart => {
-                    info!("Restarting server");
                     inner_tx.send(ServerTaskRequest::Stop).await.unwrap();
                     inner_tx.send(ServerTaskRequest::Start).await.unwrap();
                 }
-                ServerTaskRequest::Kill => {
-                    info!("Killing server task");
-                    if !server_is_running {
-                        debug!("Minecraft server not running, skipping stop command");
-                        token.cancel();
-                        break;
-                    }
-                    // send stop command
-                    if let Some(ref senders) = server_senders {
-                        info!("Server is still running, stopping it");
-                        let sender = senders.stdin();
-                        if let Err(e) = sender.send("stop".to_string()).await {
-                            error!("Error sending stop command to server: {e}");
-                        }
-                    }
-                    if let Some(handle) = server_exit_handle.take() {
-                        info!(
-                            "Waiting for server to stop (if this takes too long, kill it manually)"
-                        );
-                        if let Err(e) = handle.await {
-                            error!("Error waiting for server to stop: {e}");
-                        }
-                    }
-                }
                 ServerTaskRequest::Command(command) => {
                     if let Some(ref senders) = server_senders {
-                        if command.trim_end() == "stop" {
-                            inner_tx
-                                .send(ServerTaskRequest::Stop)
-                                .await
-                                .unwrap_or_else(|e| {
-                                    error!("Error sending stop command to server task: {e}");
-                                });
-                            continue;
-                        }
-                        debug!("Sending command to server: {command}");
                         let sender = senders.stdin();
                         if let Err(e) = sender.send(command).await {
                             error!("Error sending command to server: {e}");
@@ -314,6 +307,31 @@ pub fn begin_server_task(
                 }
             }
         }
+        // at this point, the token has been cancelled, so we can wait for the restart task to exit
+        if let Some(handle) = restart_handle {
+            handle.await.unwrap_or_else(|e| {
+                error!("Error waiting for restart task to exit: {e}");
+            });
+        }
     });
     (task_handle, server_task_tx)
+}
+
+fn maybe_start_restart_task(
+    config: &SswConfig,
+    inner_tx: &Sender<ServerTaskRequest>,
+    token: CancellationToken,
+) -> Option<JoinHandle<()>> {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let restart_duration = Duration::from_secs((*config.restart_after_hrs() * 60.0 * 60.0) as u64);
+
+    if restart_duration.is_zero() {
+        None
+    } else {
+        Some(begin_restart_task(
+            restart_duration,
+            inner_tx.clone(),
+            token,
+        ))
+    }
 }

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use duration_string::DurationString;
-use log::error;
+use log::{error, debug};
 use tokio::{select, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
@@ -31,6 +31,7 @@ pub fn begin_restart_task(
                         time_left -= split_duration;
                     }
                     _ = token.cancelled() => {
+                        debug!("Restart task cancelled");
                         return;
                     }
                 }
