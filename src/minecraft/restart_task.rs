@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use duration_string::DurationString;
-use log::{error, debug};
+use log::{debug, error};
 use tokio::{select, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
@@ -22,7 +22,8 @@ pub fn begin_restart_task(
             let mut ticker = tokio::time::interval(split_duration);
             ticker.tick().await; // immediately tick to start
             while time_left > split_duration {
-                let msg = format!("{} {}", MESSAGE_PREFIX, DurationString::from(time_left));
+                let duration_string = DurationString::from(time_left);
+                let msg = format!("{MESSAGE_PREFIX} {duration_string}");
                 if let Err(e) = server_sender.send(ServerTaskRequest::Command(msg)).await {
                     error!("Failed to send restart notification: {e}");
                 }

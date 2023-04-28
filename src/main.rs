@@ -18,8 +18,8 @@ mod minecraft;
 #[tokio::main]
 async fn main() {
     if let Err(e) = init_logging(LevelFilter::Debug) {
-        eprintln!("Failed to initialize logging: {}", e);
-        eprintln!("Debug info: {:?}", e);
+        eprintln!("Failed to initialize logging: {e}");
+        eprintln!("Debug info: {e:?}");
         std::process::exit(1);
     }
     // TODO: clap args

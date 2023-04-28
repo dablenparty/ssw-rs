@@ -71,11 +71,11 @@ fn rotate_logs() -> io::Result<PathBuf> {
         .map_or_else(|_| Local::now(), DateTime::<Local>::from);
     let package_name = env!("CARGO_PKG_NAME");
     let dated_name = create_time
-        .format(&format!("{}-%Y-%m-%d-%H-%M-%S.log", package_name))
+        .format(&format!("{package_name}-%Y-%m-%d-%H-%M-%S.log"))
         .to_string();
 
     // this is where the actual zipping happens
-    let archive_path = log_path.join(format!("{}.gz", dated_name));
+    let archive_path = log_path.join(format!("{dated_name}.gz"));
     let file_handle = fs::File::create(archive_path)?;
     let log_data = fs::read(&latest_log)?;
     let mut gz = GzBuilder::new()
