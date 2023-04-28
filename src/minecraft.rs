@@ -120,7 +120,6 @@ impl MinecraftServer<'_> {
         // TODO: get java executable
         // this will be a PathBuf or &Path
         let java_executable = "java";
-        // TODO: load config
         let config = {
             let config_path = self.jar_path.with_file_name("ssw-config.toml");
             let config = if self.config.is_some() || config_path.exists() {

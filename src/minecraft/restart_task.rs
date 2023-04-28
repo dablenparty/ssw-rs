@@ -7,7 +7,6 @@ use tokio_util::sync::CancellationToken;
 
 use super::ServerTaskRequest;
 
-// TODO: USE THIS!!!
 pub fn begin_restart_task(
     wait_for: Duration,
     server_sender: Sender<ServerTaskRequest>,

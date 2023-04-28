@@ -90,7 +90,6 @@ fn begin_stdin_task(
                     break;
                 }
                 _ => {
-                    // TODO: check status and only send command if server is running
                     server_sender
                         .send(ServerTaskRequest::IsRunning)
                         .await
