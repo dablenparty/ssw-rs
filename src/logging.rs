@@ -67,11 +67,11 @@ fn rotate_logs() -> io::Result<PathBuf> {
     // get the creation time of the latest log, or use the current time if
     // we can't get the creation time
     let create_time = fs::metadata(&latest_log)?
-        .created()
+        .modified()
         .map_or_else(|_| Local::now(), DateTime::<Local>::from);
     let package_name = env!("CARGO_PKG_NAME");
     let dated_name = create_time
-        .format(&format!("{package_name}-%Y-%m-%d-%H-%M-%S.log"))
+        .format(&format!("{package_name}-%Y-%m-%d_%H-%M-%S.log"))
         .to_string();
 
     // this is where the actual zipping happens
