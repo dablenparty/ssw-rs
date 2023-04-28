@@ -1,3 +1,7 @@
+#![warn(clippy::all, clippy::pedantic)]
+// the same thing has different names on windows and unix for some reason
+#![allow(clippy::module_name_repetitions)]
+
 use std::path::PathBuf;
 
 use log::{debug, error, info, warn, LevelFilter};
@@ -49,16 +53,15 @@ fn begin_stdin_task(
         loop {
             let line = select! {
                 r = stdin_reader.next_line() => {
-                    match r.unwrap_or_else(|e| {
+                    if let Some(line) = r.unwrap_or_else(|e| {
                         error!("Error reading from stdin: {e}");
                         None
-                    }) {
-                        Some(line) => line,
-                        None => {
+                    }) { line }
+                        else {
                             warn!("Stdin closed or errored");
                             break;
                         }
-                    }
+
                 }
                 _ = token.cancelled() => {
                     info!("Stdin task cancelled");
@@ -70,6 +73,11 @@ fn begin_stdin_task(
                 "start" => {
                     if let Err(e) = server_sender.send(ServerTaskRequest::Start).await {
                         error!("Error sending start request: {e}");
+                    }
+                }
+                "stop" => {
+                    if let Err(e) = server_sender.send(ServerTaskRequest::Stop).await {
+                        error!("Error sending stop request: {e}");
                     }
                 }
                 "exit" => {
