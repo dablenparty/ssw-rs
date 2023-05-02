@@ -17,6 +17,7 @@ use crate::config::SswConfig;
 
 use self::{restart_task::begin_restart_task, shutdown_task::begin_shutdown_task};
 
+mod ping_task;
 mod restart_task;
 mod shutdown_task;
 
