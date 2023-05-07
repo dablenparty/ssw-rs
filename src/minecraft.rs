@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io, path::PathBuf, process::Stdio, time::Duration};
+use std::{collections::HashMap, io, path::PathBuf, process::Stdio, str::FromStr, time::Duration};
 
 use getset::Getters;
 use java_properties::PropertiesIter;
@@ -88,20 +88,32 @@ impl MinecraftServer<'_> {
         }
     }
 
-    /// Get the port the server is running on from the server.properties file
-    /// If the file does not exist, or the port is not set, the default Minecraft port `25565`
-    /// is returned.
+    /// Convenience method to get the port the server is running on
+    /// This is equivalent to calling `get_property("server-port").unwrap_or(25565)`
+    /// as `25565` is the default port for Minecraft servers.
     pub fn get_port(&self) -> u16 {
-        const DEFAULT_MINECRAFT_PORT: u16 = 25565;
+        self.get_property("server-port").unwrap_or(25565)
+    }
+
+    /// Get the value of a property from the server.properties file, if it exists
+    /// If the file does not exist, or the property is not set, `None` is returned.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key of the property to get
+    pub fn get_property<T>(&self, key: &str) -> Option<T>
+    where
+        T: FromStr,
+    {
         let properties_path = self.jar_path.with_file_name("server.properties");
-        std::fs::File::open(properties_path).map_or(DEFAULT_MINECRAFT_PORT, |f| {
+        std::fs::File::open(properties_path).ok().and_then(|f| {
             let properties_reader = std::io::BufReader::new(f);
             PropertiesIter::new(properties_reader)
                 .into_iter()
                 .find_map(|r| {
                     if let Ok(line) = r {
                         match line.consume_content() {
-                            java_properties::LineContent::KVPair(k, v) if k == "server-port" => {
+                            java_properties::LineContent::KVPair(k, v) if k == key => {
                                 v.parse().ok()
                             }
                             _ => None,
@@ -110,7 +122,6 @@ impl MinecraftServer<'_> {
                         None
                     }
                 })
-                .unwrap_or(DEFAULT_MINECRAFT_PORT)
         })
     }
 
@@ -118,6 +129,7 @@ impl MinecraftServer<'_> {
         &mut self,
         restart_token: CancellationToken,
     ) -> Result<(JoinHandle<()>, MinecraftServerSenders), MinecraftServerError> {
+        const DEFAULT_MC_PORT: u16 = 25565;
         debug!("Jar path: {}", self.jar_path.display());
         // TODO: get java executable
         // this will be a PathBuf or &Path
@@ -145,7 +157,8 @@ impl MinecraftServer<'_> {
         }
         // TODO: check if the java version is valid for the server version
         // TODO: patch Log4Shell
-        info!("Starting Minecraft server on port {}", self.get_port());
+        let port: u16 = self.get_port();
+        info!("Starting Minecraft server on port {port}");
         let min_memory_in_mb = *config.min_memory_in_mb();
         let max_memory_in_mb = *config.max_memory_in_mb();
         let min_mem_arg = format!("-Xms{min_memory_in_mb}M");
