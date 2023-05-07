@@ -125,9 +125,18 @@ impl MinecraftServer<'_> {
         })
     }
 
+    /// Start the Minecraft server, returning a handle to the task and a channel to send messages to the server.
+    /// The task will run until the server is stopped, and if SSW is configured to listen for connections, it will
+    /// also do that.
+    ///
+    /// # Arguments
+    ///
+    /// * `restart_token` - A token for the restart task that is cancelled when the server is stopped.
+    /// * `server_token` - A token for the server task that should only be cancelled in the event of a fatal error.
     async fn start(
         &mut self,
         restart_token: CancellationToken,
+        server_token: CancellationToken,
     ) -> Result<(JoinHandle<()>, MinecraftServerSenders), MinecraftServerError> {
         const DEFAULT_MC_PORT: u16 = 25565;
         debug!("Jar path: {}", self.jar_path.display());
@@ -190,8 +199,18 @@ impl MinecraftServer<'_> {
         };
 
         let exit_handle = tokio::spawn(async move {
-            if let Err(e) = process.wait().await {
-                error!("Error waiting for server process: {e}");
+            select! {
+                r = process.wait() => {
+                    if let Err(e) = r {
+                        error!("Error waiting for server process: {e}");
+                    }
+                }
+                _ = server_token.cancelled() => {
+                    info!("Server task cancelled, killing server process");
+                    if let Err(e) = process.kill().await {
+                        error!("Error killing server process: {e}");
+                    }
+                }
             }
             restart_token.cancel();
             for (handle, token) in handles {
@@ -268,22 +287,24 @@ pub fn begin_server_task(
                         continue;
                     }
                     let restart_token = token.child_token();
-                    (server_exit_handle, server_senders) =
-                        match server.start(restart_token.clone()).await {
-                            Ok((handle, senders)) => {
-                                // the token is passed to the server exit handler which cancels it when the server exits
-                                // therefore it's ok to replace the old handle with the new one without checking if it's finished
-                                maybe_start_restart_task(&config, &inner_tx, restart_token.clone())
-                                    .map_or((), |h| {
-                                        handle_map.insert("restart".to_string(), h);
-                                    });
-                                (Some(handle), Some(senders))
-                            }
-                            Err(e) => {
-                                error!("Error starting server: {e}");
-                                continue;
-                            }
-                        };
+                    (server_exit_handle, server_senders) = match server
+                        .start(restart_token.clone(), token.child_token())
+                        .await
+                    {
+                        Ok((handle, senders)) => {
+                            // the token is passed to the server exit handler which cancels it when the server exits
+                            // therefore it's ok to replace the old handle with the new one without checking if it's finished
+                            maybe_start_restart_task(&config, &inner_tx, restart_token.clone())
+                                .map_or((), |h| {
+                                    handle_map.insert("restart".to_string(), h);
+                                });
+                            (Some(handle), Some(senders))
+                        }
+                        Err(e) => {
+                            error!("Error starting server: {e}");
+                            continue;
+                        }
+                    };
                 }
                 ServerTaskRequest::Kill | ServerTaskRequest::Stop => {
                     if !server_is_running {
