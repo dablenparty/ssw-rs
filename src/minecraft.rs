@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io, path::PathBuf, process::Stdio, str::FromStr, time::Duration};
+use std::{io, path::PathBuf, process::Stdio, str::FromStr, time::Duration};
 
 use getset::Getters;
 use java_properties::PropertiesIter;
@@ -45,7 +45,7 @@ fn pipe_stdin(process: &mut Child, token: CancellationToken) -> (JoinHandle<()>,
                     }
                 }
                 _ = token.cancelled() => {
-                    info!("Process stdin pipe cancelled");
+                    debug!("Process stdin pipe cancelled");
                     break;
                 }
             }
@@ -135,7 +135,7 @@ impl MinecraftServer<'_> {
     /// * `server_token` - A token for the server task that should only be cancelled in the event of a fatal error.
     async fn start(
         &mut self,
-        restart_token: CancellationToken,
+        server_sender: Sender<ServerTaskRequest>,
         server_token: CancellationToken,
     ) -> Result<(JoinHandle<()>, MinecraftServerSenders), MinecraftServerError> {
         const DEFAULT_MC_PORT: u16 = 25565;
@@ -192,13 +192,34 @@ impl MinecraftServer<'_> {
         let proc_stdin_token = CancellationToken::new();
         let (stdin_handle, stdin_sender) = pipe_stdin(&mut process, proc_stdin_token.child_token());
 
-        let handles = vec![(stdin_handle, Some(proc_stdin_token))];
+        let mut handles = vec![(stdin_handle, Some(proc_stdin_token))];
 
         let senders = MinecraftServerSenders {
             stdin: stdin_sender,
         };
 
+        let restart_duration = Duration::from_secs_f32(*config.restart_after_hrs() * 3600.0);
+        let shutdown_duration = Duration::from_secs_f32(*config.shutdown_after_mins() * 60.0);
+
         let exit_handle = tokio::spawn(async move {
+            let child_token = server_token.child_token();
+            if !restart_duration.is_zero() {
+                let restart_task = begin_restart_task(
+                    restart_duration,
+                    server_sender.clone(),
+                    child_token.clone(),
+                );
+                handles.push((restart_task, Some(child_token.clone())));
+            }
+            if !shutdown_duration.is_zero() {
+                let shutdown_task = begin_shutdown_task(
+                    shutdown_duration,
+                    format!("127.0.0.1:{port}"),
+                    server_sender.clone(),
+                    child_token.clone(),
+                );
+                handles.push((shutdown_task, Some(child_token.clone())));
+            }
             select! {
                 r = process.wait() => {
                     if let Err(e) = r {
@@ -212,7 +233,6 @@ impl MinecraftServer<'_> {
                     }
                 }
             }
-            restart_token.cancel();
             for (handle, token) in handles {
                 if let Some(token) = token {
                     token.cancel();
@@ -255,14 +275,8 @@ pub fn begin_server_task(
     let inner_tx = server_task_tx.clone();
     let task_handle = tokio::spawn(async move {
         let mut server = MinecraftServer::new(jar_path);
-        let config = server.config.clone().unwrap_or_default();
         let mut server_exit_handle: Option<JoinHandle<()>> = None;
         let mut server_senders = None;
-        let mut handle_map = HashMap::<String, JoinHandle<()>>::new();
-        // using map_or is more concise than using if-let
-        maybe_start_shutdown_task(&config, server.get_port(), &inner_tx, &token).map_or((), |h| {
-            handle_map.insert("shutdown".to_string(), h);
-        });
         loop {
             let message = select! {
                 r = server_task_rx.recv() => {
@@ -272,7 +286,7 @@ pub fn begin_server_task(
                     })
                 }
                 _ = token.cancelled() => {
-                    info!("Server message task cancelled");
+                    debug!("Server message task cancelled");
                     break;
                 }
             };
@@ -286,25 +300,14 @@ pub fn begin_server_task(
                         warn!("Server is already running");
                         continue;
                     }
-                    let restart_token = token.child_token();
-                    (server_exit_handle, server_senders) = match server
-                        .start(restart_token.clone(), token.child_token())
-                        .await
-                    {
-                        Ok((handle, senders)) => {
-                            // the token is passed to the server exit handler which cancels it when the server exits
-                            // therefore it's ok to replace the old handle with the new one without checking if it's finished
-                            maybe_start_restart_task(&config, &inner_tx, restart_token.clone())
-                                .map_or((), |h| {
-                                    handle_map.insert("restart".to_string(), h);
-                                });
-                            (Some(handle), Some(senders))
-                        }
-                        Err(e) => {
-                            error!("Error starting server: {e}");
-                            continue;
-                        }
-                    };
+                    (server_exit_handle, server_senders) =
+                        match server.start(inner_tx.clone(), token.child_token()).await {
+                            Ok((h, s)) => (Some(h), Some(s)),
+                            Err(e) => {
+                                error!("Error starting server: {e}");
+                                continue;
+                            }
+                        };
                 }
                 ServerTaskRequest::Kill | ServerTaskRequest::Stop => {
                     if !server_is_running {
@@ -327,6 +330,7 @@ pub fn begin_server_task(
                             error!("Error waiting for server to stop: {e}");
                         }
                     }
+                    info!("Server stopped");
                 }
                 ServerTaskRequest::Restart => {
                     inner_tx.send(ServerTaskRequest::Stop).await.unwrap();
@@ -347,54 +351,6 @@ pub fn begin_server_task(
                 }
             }
         }
-        // at this point, the token has been cancelled and the server is not running, so we can wait for the other tasks to exit
-        for (id, handle) in handle_map {
-            debug!("Waiting for child task '{id} 'to exit");
-            if let Err(e) = handle.await {
-                error!("Error waiting on child task: {e}");
-            }
-        }
     });
     (task_handle, server_task_tx)
-}
-
-fn maybe_start_shutdown_task(
-    config: &SswConfig,
-    port: u16,
-    inner_tx: &Sender<ServerTaskRequest>,
-    token: &CancellationToken,
-) -> Option<JoinHandle<()>> {
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let shutdown_duration = Duration::from_secs((config.shutdown_after_mins() * 60.0) as u64);
-    // TODO: read from server properties
-    if shutdown_duration.is_zero() {
-        return None;
-    }
-    let server_address = format!("127.0.0.1:{port}");
-    let shutdown_handle = begin_shutdown_task(
-        shutdown_duration,
-        server_address,
-        inner_tx.clone(),
-        token.child_token(),
-    );
-    Some(shutdown_handle)
-}
-
-fn maybe_start_restart_task(
-    config: &SswConfig,
-    inner_tx: &Sender<ServerTaskRequest>,
-    token: CancellationToken,
-) -> Option<JoinHandle<()>> {
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let restart_duration = Duration::from_secs((*config.restart_after_hrs() * 60.0 * 60.0) as u64);
-
-    if restart_duration.is_zero() {
-        None
-    } else {
-        Some(begin_restart_task(
-            restart_duration,
-            inner_tx.clone(),
-            token,
-        ))
-    }
 }

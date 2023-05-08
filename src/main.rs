@@ -64,7 +64,7 @@ fn begin_stdin_task(
 
                 }
                 _ = token.cancelled() => {
-                    info!("Stdin task cancelled");
+                    debug!("Stdin task cancelled");
                     break;
                 }
             };

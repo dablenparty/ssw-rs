@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use duration_string::DurationString;
-use log::{info, warn};
+use log::{debug, info, warn};
 use tokio::{select, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
@@ -36,6 +36,7 @@ pub fn begin_shutdown_task(
                 _ = token.cancelled() => {
                     // since the pinger uses a child token, if this one was cancelled, the pinger will be too
                     pinger.await.unwrap_or_else(|e| warn!("Failed to await pinger: {e}"));
+                    debug!("Shutdown task cancelled");
                     break;
                 }
             };
