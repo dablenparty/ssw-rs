@@ -154,21 +154,11 @@ impl MinecraftServer<'_> {
         const DEFAULT_MC_PORT: u16 = 25565;
         let config = {
             let config_path = self.jar_path.with_file_name("ssw-config.toml");
-            let config = if self.config.is_some() || config_path.exists() {
-                SswConfig::try_from(config_path).unwrap_or_else(|e| {
-                    error!("Error loading config: {e}");
-                    SswConfig::default()
-                })
-            } else {
-                let config = SswConfig::default();
-                config.save(&config_path).await?;
-                config
-            };
+            let config = SswConfig::load(&config_path).await?;
             self.config = Some(config);
             self.config.as_ref().unwrap()
         };
         debug!("Loaded config: {config:#?}");
-        // TODO: try to read the minecraft version from the jar manifest
         if config.mc_version().is_none() {
             error!("The Minecraft version is not set in the config");
             return Err(crate::config::SswConfigError::MissingMinecraftVersion)?;

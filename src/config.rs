@@ -30,7 +30,7 @@ pub struct SswConfig<'s> {
     /// The maximum amount of memory to allocate to the server in MB
     max_memory_in_mb: usize,
     /// The version of Minecraft to run. This is used to determine how to patch Log4Shell.
-    mc_version: Option<Cow<'s, str>>,
+    mc_version: Option<String>,
     /// The number of hours to wait before restarting the server (set to 0 to disable)
     restart_after_hrs: f32,
     /// The number of minutes to wait before shutting down the server (set to 0 to disable)
@@ -88,9 +88,77 @@ impl TryFrom<&Path> for SswConfig<'_> {
 }
 
 impl<'s> SswConfig<'s> {
-    pub async fn save(&self, path: &Path) -> Result<(), SswConfigError> {
-        let config = toml::to_string_pretty(self)?;
-        tokio::fs::write(path, config).await?;
-        Ok(())
+    /// Attempts to load the config from the given path. If the file does not
+    /// exist, a default config is created and saved to the given path. This
+    /// function will also attempt to read the Minecraft version from the
+    /// jar files in the parent folder of the given path.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to the config file
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the config file cannot be read or
+    /// parsed, or if the Minecraft version cannot be read from the jar files.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the parent folder of the given path does
+    /// not exist.
+    pub async fn load(path: &Path) -> Result<SswConfig<'s>, SswConfigError> {
+        if path.exists() {
+            Self::try_from(path)
+        } else {
+            let mut config = Self::default();
+            let parent = path.parent().unwrap();
+            let mc_version = try_read_version_from_folder(parent).await?;
+            config.set_mc_version(mc_version);
+            // save config
+            let toml_string = toml::to_string_pretty(&config)?;
+            tokio::fs::write(path, toml_string).await?;
+            Ok(config)
+        }
     }
+}
+
+/// Tries to read the version string from the given folder.
+///
+/// All Minecraft versions `1.14` and later have a `version.json` file in the
+/// server jar file. This function will attempt to read the version string from
+/// that file. If the file is not found, or the version string cannot be read,
+/// `None` is returned.
+///
+/// This function uses the sync `zip` crate because the `async_zip` crate has
+/// issues with reading some types of zip files.
+pub async fn try_read_version_from_folder(server_folder: &Path) -> std::io::Result<Option<String>> {
+    // get all jar files, ignoring errors (e.g., if a file is not a jar)
+    let jar_files = {
+        let mut dir_reader = tokio::fs::read_dir(server_folder).await?;
+        let mut jar_files = Vec::new();
+        while let Ok(Some(entry)) = dir_reader.next_entry().await {
+            let path = entry.path();
+            if let Some(ext) = path.extension() {
+                if ext == "jar" {
+                    jar_files.push(path);
+                }
+            }
+        }
+        jar_files
+    };
+    for jar in jar_files {
+        let jar_handle = std::fs::File::open(&jar)?;
+        let mut jar_reader = zip::ZipArchive::new(jar_handle)?;
+        match jar_reader.by_name("version.json") {
+            Ok(version_json) => {
+                let parsed: serde_json::Value = serde_json::from_reader(version_json)?;
+                return Ok(parsed["id"].as_str().map(String::from));
+            }
+            Err(e) => {
+                warn!("failed to read version.json from jar file {jar:?}: {e:?}",);
+                continue;
+            }
+        };
+    }
+    Ok(None)
 }
