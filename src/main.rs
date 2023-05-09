@@ -30,6 +30,8 @@ async fn main() {
         begin_server_task(jar_path, running_tx, server_token.clone());
     let stdin_token = CancellationToken::new();
     let stdin_handle = begin_stdin_task(server_sender, running_rx, stdin_token);
+    let ssw_version = env!("CARGO_PKG_VERSION");
+    println!("SSW Console v{ssw_version}");
     stdin_handle.await.unwrap_or_else(|e| {
         error!("Error waiting on stdin task: {e}");
     });
