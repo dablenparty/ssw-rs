@@ -97,7 +97,7 @@ fn begin_stdin_task(
                             error!("Error sending is_running request: {e}");
                         });
                     if !running_rx.recv().await.unwrap_or(false) {
-                        debug!("Server is not running, ignoring command");
+                        warn!("Unknown command: {line}");
                         continue;
                     }
                     if let Err(e) = server_sender.send(ServerTaskRequest::Command(line)).await {
