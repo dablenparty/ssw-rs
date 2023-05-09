@@ -192,7 +192,7 @@ impl MinecraftServer<'_> {
         let proc_stdin_token = CancellationToken::new();
         let (stdin_handle, stdin_sender) = pipe_stdin(&mut process, proc_stdin_token.child_token());
 
-        let mut handles = vec![(stdin_handle, Some(proc_stdin_token))];
+        let mut handles = vec![(stdin_handle, proc_stdin_token)];
 
         let senders = MinecraftServerSenders {
             stdin: stdin_sender,
@@ -202,23 +202,21 @@ impl MinecraftServer<'_> {
         let shutdown_duration = Duration::from_secs_f32(*config.shutdown_after_mins() * 60.0);
 
         let exit_handle = tokio::spawn(async move {
-            let child_token = server_token.child_token();
             if !restart_duration.is_zero() {
-                let restart_task = begin_restart_task(
-                    restart_duration,
-                    server_sender.clone(),
-                    child_token.clone(),
-                );
-                handles.push((restart_task, Some(child_token.clone())));
+                let token = server_token.child_token();
+                let restart_task =
+                    begin_restart_task(restart_duration, server_sender.clone(), token.clone());
+                handles.push((restart_task, token));
             }
             if !shutdown_duration.is_zero() {
+                let token = server_token.child_token();
                 let shutdown_task = begin_shutdown_task(
                     shutdown_duration,
                     format!("127.0.0.1:{port}"),
                     server_sender.clone(),
-                    child_token.clone(),
+                    token.clone(),
                 );
-                handles.push((shutdown_task, Some(child_token.clone())));
+                handles.push((shutdown_task, token));
             }
             select! {
                 r = process.wait() => {
@@ -234,9 +232,7 @@ impl MinecraftServer<'_> {
                 }
             }
             for (handle, token) in handles {
-                if let Some(token) = token {
-                    token.cancel();
-                }
+                token.cancel();
                 if let Err(e) = handle.await {
                     error!("Error waiting on child task: {e}");
                 }
