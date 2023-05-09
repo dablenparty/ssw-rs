@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 
+use clap::Parser;
 use log::{debug, error, info, warn, LevelFilter};
 use minecraft::{begin_server_task, ServerTaskRequest};
 use tokio::{io::AsyncBufReadExt, select, sync::mpsc::Sender, task::JoinHandle};
@@ -15,15 +16,29 @@ mod config;
 mod logging;
 mod minecraft;
 
+/// Simple Server Wrapper (SSW) is a simple wrapper for Minecraft servers, allowing for easy
+/// automation of some simple server management features.
+#[derive(Debug, Parser)]
+struct CommandLineArgs {
+    /// The path to the server jar
+    #[arg(required = true)]
+    server_jar_path: PathBuf,
+
+    /// The log level to use, defaults to info
+    #[arg(long, short, default_value = "info")]
+    log_level: LevelFilter,
+}
+
 #[tokio::main]
 async fn main() {
-    if let Err(e) = init_logging(LevelFilter::Debug) {
+    let args = CommandLineArgs::parse();
+    if let Err(e) = init_logging(args.log_level) {
         eprintln!("Failed to initialize logging: {e}");
         eprintln!("Debug info: {e:?}");
         std::process::exit(1);
     }
-    // TODO: clap args
-    let jar_path = PathBuf::from("mc-server/server.jar");
+    debug!("Parsed args: {args:?}");
+    let jar_path = args.server_jar_path;
     let server_token = CancellationToken::new();
     let (running_tx, running_rx) = tokio::sync::mpsc::channel(1);
     let (server_handle, server_sender) =
