@@ -4,6 +4,7 @@ use std::{
 };
 
 use getset::{Getters, MutGetters, Setters};
+use log::warn;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -36,6 +37,8 @@ pub struct SswConfig<'s> {
     shutdown_after_mins: f32,
     /// Whether to automatically start the server when it is stopped and the listener receives a connection
     auto_start: bool,
+    /// The path to the Java executable to use
+    java_path: String,
 }
 
 impl Default for SswConfig<'_> {
@@ -55,6 +58,13 @@ impl Default for SswConfig<'_> {
             restart_after_hrs: 12.0,
             shutdown_after_mins: 5.0,
             auto_start: true,
+            java_path: which::which("java").map_or_else(
+                |e| {
+                    warn!("Failed to find java in PATH: {e}");
+                    "java".into()
+                },
+                |p| p.to_string_lossy().into_owned(),
+            ),
         }
     }
 }

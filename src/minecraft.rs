@@ -97,6 +97,7 @@ impl MinecraftServer<'_> {
         self.get_property("server-port").unwrap_or(25565)
     }
 
+    /// Convenience method to get the address the server is running on
     pub fn get_address(&self) -> String {
         let port = self.get_port();
         let address = self.get_property::<String>("server-ip").map_or_else(
@@ -151,9 +152,6 @@ impl MinecraftServer<'_> {
         server_token: CancellationToken,
     ) -> Result<(JoinHandle<()>, mpsc::Sender<String>), MinecraftServerError> {
         const DEFAULT_MC_PORT: u16 = 25565;
-        // TODO: get java executable
-        // this will be a PathBuf or &Path
-        let java_executable = "java";
         let config = {
             let config_path = self.jar_path.with_file_name("ssw-config.toml");
             let config = if self.config.is_some() || config_path.exists() {
@@ -175,6 +173,7 @@ impl MinecraftServer<'_> {
             error!("The Minecraft version is not set in the config");
             return Err(crate::config::SswConfigError::MissingMinecraftVersion)?;
         }
+        let java_executable = config.java_path();
         // TODO: check if the java version is valid for the server version
         // TODO: patch Log4Shell
         let port = self.get_port();
