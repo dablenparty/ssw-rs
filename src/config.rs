@@ -34,6 +34,8 @@ pub struct SswConfig<'s> {
     restart_after_hrs: f32,
     /// The number of minutes to wait before shutting down the server (set to 0 to disable)
     shutdown_after_mins: f32,
+    /// Whether to automatically start the server when it is stopped and the listener receives a connection
+    auto_start: bool,
 }
 
 impl Default for SswConfig<'_> {
@@ -52,6 +54,7 @@ impl Default for SswConfig<'_> {
             mc_version: None,
             restart_after_hrs: 12.0,
             shutdown_after_mins: 5.0,
+            auto_start: true,
         }
     }
 }
