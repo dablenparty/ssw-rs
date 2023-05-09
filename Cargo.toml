@@ -13,6 +13,7 @@ bench = false
 
 [dependencies]
 chrono = { version = "0.4.24", features = ["serde"] }
+clap = { version = "4.2.7", features = ["derive"] }
 dirs = "5.0.0"
 dunce = "1.0.4"
 duration-string = "0.3.0"
@@ -28,3 +29,4 @@ thiserror = "1.0.40"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7.8"
 toml = "0.7.3"
+which = "4.4.0"
