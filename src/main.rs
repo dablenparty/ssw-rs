@@ -87,8 +87,7 @@ fn begin_stdin_task(
                     if let Err(e) = server_sender.send(ServerTaskRequest::Kill).await {
                         error!("Error sending kill request: {e}");
                     }
-                    info!("Exiting");
-                    token.cancel();
+                    info!("Exiting, expect some errors as the server is killed");
                     break;
                 }
                 _ => {
