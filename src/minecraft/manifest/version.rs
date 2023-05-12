@@ -14,6 +14,7 @@ pub enum MinecraftVersionType {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct MinecraftVersion {
     /// The ID of the version (e.g., `1.16.1`)
     id: String,
