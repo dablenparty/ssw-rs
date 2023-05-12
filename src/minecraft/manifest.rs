@@ -46,15 +46,15 @@ impl VersionManifestV2 {
     ///
     /// This function will return an error if the version manifest could not be
     /// downloaded, parsed, or written to disk.
-    pub async fn refresh_launcher_manifest() -> Result<VersionManifestV2, VersionManifestError> {
+    pub async fn refresh_launcher_manifest() -> Result<(), VersionManifestError> {
         let manifest_location = get_manifest_location();
-        let manifest_string = reqwest::get(MANIFEST_V2_URL)
+        let manifest_bytes = reqwest::get(MANIFEST_V2_URL)
             .await?
             .error_for_status()?
-            .text()
+            .bytes()
             .await?;
-        tokio::fs::write(manifest_location, &manifest_string).await?;
-        VersionManifestV2::try_from(manifest_string)
+        tokio::fs::write(manifest_location, manifest_bytes).await?;
+        Ok(())
     }
 }
 
