@@ -23,7 +23,7 @@ use self::{
 };
 
 mod listener_task;
-mod manifest;
+pub mod manifest;
 mod ping_task;
 mod restart_task;
 mod shutdown_task;

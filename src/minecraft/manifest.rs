@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use getset::Getters;
+use log::debug;
 use serde::Deserialize;
 
 pub mod version;
@@ -48,11 +49,16 @@ impl VersionManifestV2 {
     /// downloaded, parsed, or written to disk.
     pub async fn refresh_launcher_manifest() -> Result<(), VersionManifestError> {
         let manifest_location = get_manifest_location();
+        debug!("Downloading version manifest from {MANIFEST_V2_URL}");
         let manifest_bytes = reqwest::get(MANIFEST_V2_URL)
             .await?
             .error_for_status()?
             .bytes()
             .await?;
+        debug!(
+            "Writing version manifest to {}",
+            manifest_location.display()
+        );
         tokio::fs::write(manifest_location, manifest_bytes).await?;
         Ok(())
     }

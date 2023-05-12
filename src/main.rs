@@ -10,7 +10,7 @@ use minecraft::{begin_server_task, ServerTaskRequest};
 use tokio::{io::AsyncBufReadExt, select, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
-use crate::logging::init_logging;
+use crate::{logging::init_logging, minecraft::manifest::VersionManifestV2};
 
 mod config;
 mod logging;
@@ -27,6 +27,10 @@ struct CommandLineArgs {
     /// The log level to use, defaults to info
     #[arg(long, short, default_value = "info")]
     log_level: LevelFilter,
+
+    /// Refresh the version manifest when SSW starts
+    #[arg(long, short)]
+    refresh_manifest: bool,
 }
 
 #[tokio::main]
@@ -38,6 +42,13 @@ async fn main() {
         std::process::exit(1);
     }
     debug!("Parsed args: {args:?}");
+    if args.refresh_manifest {
+        if let Err(e) = VersionManifestV2::refresh_launcher_manifest().await {
+            error!("Failed to refresh version manifest: {e}");
+        } else {
+            info!("Refreshed version manifest");
+        }
+    }
     let jar_path = args.server_jar_path;
     let server_token = CancellationToken::new();
     let (running_tx, running_rx) = tokio::sync::mpsc::channel(1);
