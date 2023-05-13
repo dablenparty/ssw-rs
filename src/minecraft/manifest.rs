@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use getset::Getters;
 use log::debug;
 use serde::Deserialize;
 
@@ -16,14 +15,15 @@ pub enum VersionManifestError {
     ParseError(#[from] serde_json::Error),
     #[error("Failed to read or write version manifest: {0}")]
     ReadWriteError(#[from] std::io::Error),
+    #[error("Minecraft version not found: {0}")]
+    VersionNotFound(String),
 }
 
 /// The version manifest for the Minecraft launcher.
 ///
 /// This is not a full representation of the version manifest, only the parts
 /// that are relevant to this crate.
-#[derive(Debug, Deserialize, Getters)]
-#[get = "pub"]
+#[derive(Debug, Deserialize)]
 pub struct VersionManifestV2 {
     versions: Vec<version::MinecraftVersion>,
 }
@@ -61,6 +61,13 @@ impl VersionManifestV2 {
         );
         tokio::fs::write(manifest_location, manifest_bytes).await?;
         Ok(())
+    }
+
+    pub fn find_by_id(&self, id: &str) -> Result<&version::MinecraftVersion, VersionManifestError> {
+        self.versions
+            .iter()
+            .find(|v| *v.id() == id)
+            .ok_or(VersionManifestError::VersionNotFound(id.to_string()))
     }
 }
 

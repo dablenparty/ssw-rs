@@ -1,7 +1,9 @@
 use chrono::{DateTime, Utc};
+use getset::Getters;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize, PartialEq, Eq, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
 pub enum MinecraftVersionType {
     /// A release version
     Release,
@@ -13,8 +15,9 @@ pub enum MinecraftVersionType {
     OldAlpha,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Getters, Clone)]
 #[serde(rename_all = "camelCase")]
+#[get = "pub"]
 pub struct MinecraftVersion {
     /// The ID of the version (e.g., `1.16.1`)
     id: String,

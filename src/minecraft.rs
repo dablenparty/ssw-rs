@@ -23,6 +23,7 @@ use self::{
 };
 
 mod listener_task;
+mod log4shell;
 pub mod manifest;
 mod ping_task;
 mod restart_task;
@@ -75,19 +76,22 @@ pub enum MinecraftServerError {
     ServerPropertiesError(#[from] java_properties::PropertiesError),
     #[error("Failed to update server state: {0}")]
     ServerStateError(#[from] mpsc::error::SendError<ServerState>),
+    #[error("Failed to patch Log4Shell: {0}")]
+    Log4ShellPatchError(#[from] log4shell::Log4ShellPatchError),
 }
 
 pub struct MinecraftServer<'m> {
     jar_path: PathBuf,
-    config: Option<SswConfig<'m>>,
+    config: SswConfig<'m>,
 }
 
 impl MinecraftServer<'_> {
     pub fn new(jar_path: PathBuf) -> Self {
         let jar_path = dunce::canonicalize(&jar_path).unwrap_or(jar_path);
+        let config_path = jar_path.with_file_name("ssw-config.toml");
         Self {
             jar_path,
-            config: None,
+            config: SswConfig::try_from(config_path).unwrap_or_default(),
         }
     }
 
@@ -156,8 +160,8 @@ impl MinecraftServer<'_> {
         let config = {
             let config_path = self.jar_path.with_file_name("ssw-config.toml");
             let config = SswConfig::load(&config_path).await?;
-            self.config = Some(config);
-            self.config.as_ref().unwrap()
+            self.config = config.clone();
+            config
         };
         debug!("Loaded config: {config:#?}");
         if config.mc_version().is_none() {
@@ -166,7 +170,7 @@ impl MinecraftServer<'_> {
         }
         let java_executable = config.java_path();
         // TODO: check if the java version is valid for the server version
-        // TODO: patch Log4Shell
+        self.patch_log4shell().await?;
         let port = self.get_port();
         info!("Starting Minecraft server on port {port}");
         let min_mem_arg = format!("-Xms{}M", config.min_memory_in_mb());
@@ -284,7 +288,7 @@ pub fn begin_server_task(
     let inner_tx = server_task_tx.clone();
     let task_handle = tokio::spawn(async move {
         let mut server = MinecraftServer::new(jar_path);
-        let mut config = server.config.clone().unwrap_or_default();
+        let mut config = server.config.clone();
         let mut server_senders = None;
         let mut handle_map = HashMap::<String, (JoinHandle<()>, CancellationToken)>::new();
         let state_token = token.child_token();
@@ -308,7 +312,7 @@ pub fn begin_server_task(
                         let handle = begin_listener_task(server.get_address(), inner_tx.clone(), listener_token.clone());
                         handle_map.insert("listener".into(), (handle, listener_token));
                     } else {
-                        config = server.config.clone().unwrap_or_default();
+                        config = server.config.clone();
                     }
                     continue;
                 }

@@ -88,6 +88,22 @@ impl TryFrom<&Path> for SswConfig<'_> {
 }
 
 impl<'s> SswConfig<'s> {
+    /// Saves the config to the given path.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to save the config to
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the config cannot be serialized or
+    /// written to disk.
+    pub async fn save(&self, path: &Path) -> Result<(), SswConfigError> {
+        let toml_string = toml::to_string_pretty(self)?;
+        tokio::fs::write(path, toml_string).await?;
+        Ok(())
+    }
+
     /// Attempts to load the config from the given path. If the file does not
     /// exist, a default config is created and saved to the given path. This
     /// function will also attempt to read the Minecraft version from the
@@ -114,9 +130,7 @@ impl<'s> SswConfig<'s> {
             let parent = path.parent().unwrap();
             let mc_version = try_read_version_from_folder(parent).await?;
             config.set_mc_version(mc_version);
-            // save config
-            let toml_string = toml::to_string_pretty(&config)?;
-            tokio::fs::write(path, toml_string).await?;
+            config.save(path).await?;
             Ok(config)
         }
     }
