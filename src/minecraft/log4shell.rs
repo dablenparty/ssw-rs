@@ -19,6 +19,9 @@ pub enum Log4ShellPatchError {
 }
 
 impl MinecraftServer<'_> {
+    /// Attempts to patch Log4Shell, if needed.
+    /// This function follows the instructions from
+    /// [this page](https://help.minecraft.net/hc/en-us/articles/4416199399693#:~:text=We%20have%20identified%20a%20vulnerability,%E2%80%93%20including%20Minecraft%3A%20Java%20Edition.).
     pub async fn patch_log4shell(&mut self) -> Result<(), Log4ShellPatchError> {
         let manifest = VersionManifestV2::load().await?;
         let server_version_id = self
