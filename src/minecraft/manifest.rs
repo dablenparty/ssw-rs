@@ -63,6 +63,19 @@ impl VersionManifestV2 {
         Ok(())
     }
 
+    /// Finds a version by its ID.
+    ///
+    /// This function will perform a linear search through the version manifest
+    /// to find the version with the given ID. If no version is found, an error
+    /// is returned.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The ID of the version to find
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the version cannot be found.
     pub fn find_by_id(&self, id: &str) -> Result<&version::MinecraftVersion, VersionManifestError> {
         self.versions
             .iter()
