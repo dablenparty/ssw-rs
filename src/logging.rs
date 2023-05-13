@@ -44,19 +44,23 @@ fn rotate_logs() -> io::Result<PathBuf> {
     // working directory
     #[cfg(not(debug_assertions))]
     {
-        let exe_path = std::env::current_exe()?;
-        let exe_dir = exe_path.parent().unwrap_or_else(|| {
-            eprintln!("Failed to get executable directory, using current directory");
-            std::path::Path::new(".")
-        });
-        let symlink_path = exe_dir.join("ssw-logs");
-        if symlink_path.exists() {
-            fs::remove_file(&symlink_path)?;
-        }
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&log_path, &symlink_path)?;
+        {
+            let exe_path = std::env::current_exe()?;
+            let exe_dir = exe_path.parent().unwrap_or_else(|| {
+                eprintln!("Failed to get executable directory, using current directory");
+                std::path::Path::new(".")
+            });
+            let symlink_path = exe_dir.join("ssw-logs");
+            if symlink_path.exists() {
+                fs::remove_file(&symlink_path)?;
+            }
+            std::os::unix::fs::symlink(&log_path, &symlink_path)?;
+        }
+        // symlinks on Windows require admin privileges, so we just print
+        // a message instead because it's not worth the hassle
         #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&log_path, &symlink_path)?;
+        println!("Logs can be found in {}", log_path.display());
     }
 
     let latest_log = log_path.join("latest.log");
