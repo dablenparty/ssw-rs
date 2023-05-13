@@ -19,7 +19,8 @@ pub enum Log4ShellPatchError {
 }
 
 impl MinecraftServer<'_> {
-    /// Attempts to patch Log4Shell, if needed.
+    /// Attempts to patch [`Log4Shell`](https://www.dynatrace.com/news/blog/what-is-log4shell/#:~:text=Log4Shell%20is%20a%20software%20vulnerability,certain%20versions%20of%20Log4j%202.),
+    /// if needed.
     /// This function follows the instructions from
     /// [this page](https://help.minecraft.net/hc/en-us/articles/4416199399693#:~:text=We%20have%20identified%20a%20vulnerability,%E2%80%93%20including%20Minecraft%3A%20Java%20Edition.).
     pub async fn patch_log4shell(&mut self) -> Result<(), Log4ShellPatchError> {
