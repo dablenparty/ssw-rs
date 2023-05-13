@@ -6,6 +6,7 @@ use super::{
 };
 
 #[derive(Debug, thiserror::Error)]
+#[allow(clippy::enum_variant_names)]
 pub enum Log4ShellPatchError {
     #[error("Version manifest error: {0}")]
     VersionManifestError(#[from] VersionManifestError),
