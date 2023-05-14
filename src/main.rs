@@ -116,6 +116,7 @@ fn begin_stdin_task(
                     info!("Exiting, expect some errors as the server is killed");
                     break;
                 }
+                "help" => print_help(),
                 _ => {
                     server_sender
                         .send(ServerTaskRequest::IsRunning)
@@ -135,4 +136,14 @@ fn begin_stdin_task(
         }
         info!("Finished reading from stdin");
     })
+}
+
+/// Print the help message
+fn print_help() {
+    println!("SSW Help:");
+    println!("  start - start the server");
+    println!("  stop  - stop the server");
+    println!("  exit  - stop the server and exit");
+    println!("  help  - print this help message");
+    println!("  anything else - send the command to the server");
 }
