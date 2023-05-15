@@ -8,7 +8,7 @@ The current feature list is as follows:
 
 - Automatically restarts the server after a configurable amount of time, in hours (default: `12.0`)
 - Shuts down the server when no players are online for a configurable amount of time, in minutes (default: `5.0`)
-- Start the server when a player joins if it is not already running (enabled alongside the above feature)
+- Start the server when a player joins if it is not already running
 
 ### Planned
 

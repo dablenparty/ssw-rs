@@ -14,7 +14,7 @@ pub enum ServerState {
 
 /// Starts a task that holds the current server state.
 ///
-/// This may seem like an over-abstraction, but it essentially allows us to
+/// This may seem like an over-abstraction, but it essentially allows me to
 /// treat server state changes as events and react to them in a more functional
 /// way.
 pub fn begin_state_task(
