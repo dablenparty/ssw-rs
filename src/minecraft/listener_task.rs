@@ -64,8 +64,20 @@ async fn inner_listener(
     Ok(())
 }
 
+/// Reads the first packet from the stream and determines if it is a client connection.
+///
+/// In all honesty, I have little clue why this works. I spent an embarrassing amount of
+/// time studying the packets sent by Minecraft clients and found that the initial handshake
+/// seems to always end with a `0x02` byte. I'm not sure if this is a Minecraft thing or a
+/// Java thing, but it seems to work pretty well. The problem is, if any OTHER packets come
+/// in that also end with a `0x02` byte, this will return a false positive. I'm not sure if
+/// there's a better way to do this, so it works for now. Without this check, any and all
+/// connections (pings, scans, anything) would start the server. I've tried that and it's
+/// not fun.
 async fn is_client_connection(stream: &mut TcpStream) -> std::io::Result<bool> {
     let mut buf = [0u8; 1];
+    // Minecraft prefixes packets with a VarInt that indicates the size of the packet
+    // I'm reading it as a normal `usize` because I'm lazy and it hasn't failed me yet
     stream.read_exact(&mut buf).await?;
     let next_size = buf[0] as usize;
     let mut buf = vec![0u8; next_size];
