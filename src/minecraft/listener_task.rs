@@ -1,7 +1,7 @@
 use log::{debug, error, info, warn};
 use thiserror::Error;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
     select,
     sync::mpsc,
@@ -9,12 +9,12 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::minecraft::protocol::LoginStartPacket;
-
 use super::{
     protocol::{
-        AsyncStreamReadable, HandshakePacket, NextState, ProtocolError,
-        UncompressedServerboundPacket,
+        serverbound::{
+            HandshakePacket, LoginStartPacket, NextState, UncompressedServerboundPacket,
+        },
+        AsyncStreamReadable, ProtocolError,
     },
     ServerTaskRequest,
 };
