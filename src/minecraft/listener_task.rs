@@ -1,4 +1,4 @@
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use thiserror::Error;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -9,7 +9,15 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use super::ServerTaskRequest;
+use crate::minecraft::protocol::LoginStartPacket;
+
+use super::{
+    protocol::{
+        AsyncStreamReadable, HandshakePacket, NextState, ProtocolError,
+        UncompressedServerboundPacket,
+    },
+    ServerTaskRequest,
+};
 
 #[derive(Debug, Error)]
 enum ListenerError {
@@ -45,7 +53,8 @@ async fn inner_listener(
     let listener = TcpListener::bind(&server_address).await?;
     info!("Listening on {server_address}");
     loop {
-        let (mut stream, _) = listener.accept().await?;
+        let (mut stream, addr) = listener.accept().await?;
+        debug!("Accepted connection from {addr}");
         // logging every socket connection would spam the debug logs as the pinger task will be connecting every 5 seconds
         let is_client = is_client_connection(&mut stream).await.unwrap_or_else(|e| {
             warn!("Failed to read client connection: {e}");
@@ -74,13 +83,19 @@ async fn inner_listener(
 /// there's a better way to do this, so it works for now. Without this check, any and all
 /// connections (pings, scans, anything) would start the server. I've tried that and it's
 /// not fun.
-async fn is_client_connection(stream: &mut TcpStream) -> std::io::Result<bool> {
-    let mut buf = [0u8; 1];
-    // Minecraft prefixes packets with a VarInt that indicates the size of the packet
-    // I'm reading it as a normal `usize` because I'm lazy and it hasn't failed me yet
-    stream.read_exact(&mut buf).await?;
-    let next_size = buf[0] as usize;
-    let mut buf = vec![0u8; next_size];
-    stream.read_exact(&mut buf).await?;
-    Ok(buf[next_size - 1] == b'\x02')
+async fn is_client_connection(stream: &mut TcpStream) -> Result<bool, ProtocolError> {
+    let packet = UncompressedServerboundPacket::<HandshakePacket>::read(stream).await?;
+    if *packet.data().next_state() != NextState::Login {
+        return Ok(false);
+    }
+    let login_start_packet =
+        UncompressedServerboundPacket::<LoginStartPacket>::read(stream).await?;
+    let username = login_start_packet.data().name();
+    let uuid = login_start_packet.data().player_uuid();
+    if let Some(uuid) = uuid {
+        info!("Found client {username} with UUID {uuid}");
+    } else {
+        info!("Found client {username}");
+    }
+    Ok(true)
 }
