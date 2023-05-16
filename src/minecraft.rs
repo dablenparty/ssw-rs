@@ -26,6 +26,7 @@ mod listener_task;
 mod log4shell;
 pub mod manifest;
 mod ping_task;
+mod protocol;
 mod restart_task;
 mod shutdown_task;
 mod state_task;
