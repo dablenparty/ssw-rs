@@ -1,5 +1,5 @@
 //! Minecraft protocol implementation
-//! Information taken from here: https://wiki.vg/Protocol
+//! Information taken from [the wiki](https://wiki.vg/Protocol)
 // the protocol must read all fields of the packet, but we don't need to use them all
 #![allow(dead_code)]
 
@@ -53,6 +53,8 @@ async fn read_unsigned_short(stream: &mut TcpStream) -> std::io::Result<u16> {
 /// Reads a `String` from the stream
 async fn read_string(stream: &mut TcpStream) -> std::io::Result<String> {
     let length = read_varint(stream).await?;
+    // lengths are guaranteed to be positive, so we can safely cast to usize
+    #[allow(clippy::cast_sign_loss)]
     let mut buf = vec![0u8; length as usize];
     stream.read_exact(&mut buf).await?;
     Ok(String::from_utf8(buf).expect("Invalid UTF-8 sent by Minecraft client"))
@@ -64,9 +66,15 @@ async fn read_varint(stream: &mut TcpStream) -> std::io::Result<i32> {
     let mut idx = 0;
     let mut value = 0;
     loop {
-        stream.read(&mut buf).await?;
+        let n = stream.read(&mut buf).await?;
+        if n == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Unexpected EOF",
+            ));
+        }
         let next_byte = buf[0];
-        value |= ((next_byte & SEGMENT_BITS) as i32) << (idx);
+        value |= (i32::from(next_byte & SEGMENT_BITS)) << (idx);
 
         if (next_byte & CONTINUE_BIT) == 0 {
             break;

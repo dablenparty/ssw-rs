@@ -1,4 +1,4 @@
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use thiserror::Error;
 use tokio::{
     io::AsyncWriteExt,
@@ -53,11 +53,13 @@ async fn inner_listener(
     let listener = TcpListener::bind(&server_address).await?;
     info!("Listening on {server_address}");
     loop {
-        let (mut stream, addr) = listener.accept().await?;
-        debug!("Accepted connection from {addr}");
+        let (mut stream, _) = listener.accept().await?;
         // logging every socket connection would spam the debug logs as the pinger task will be connecting every 5 seconds
         let is_client = is_client_connection(&mut stream).await.unwrap_or_else(|e| {
-            warn!("Failed to read client connection: {e}");
+            if let ProtocolError::InvalidNextState(_) = e {
+            } else {
+                warn!("Failed to determine if connection is client: {e}");
+            }
             false
         });
         if let Err(e) = stream.shutdown().await {
@@ -73,16 +75,12 @@ async fn inner_listener(
     Ok(())
 }
 
-/// Reads the first packet from the stream and determines if it is a client connection.
+/// Reads the first few packets from the stream and determines if it is a client connection.
 ///
-/// In all honesty, I have little clue why this works. I spent an embarrassing amount of
-/// time studying the packets sent by Minecraft clients and found that the initial handshake
-/// seems to always end with a `0x02` byte. I'm not sure if this is a Minecraft thing or a
-/// Java thing, but it seems to work pretty well. The problem is, if any OTHER packets come
-/// in that also end with a `0x02` byte, this will return a false positive. I'm not sure if
-/// there's a better way to do this, so it works for now. Without this check, any and all
-/// connections (pings, scans, anything) would start the server. I've tried that and it's
-/// not fun.
+/// If you look at older versions of this function, you'll see me complain about how
+/// the Minecraft protocol is a pain to implement yourself. Long story short, I did
+/// it. This function not only determines if the connection is a client connection,
+/// but it also reads the username and UUID of the client.
 async fn is_client_connection(stream: &mut TcpStream) -> Result<bool, ProtocolError> {
     let packet = UncompressedServerboundPacket::<HandshakePacket>::read(stream).await?;
     if *packet.data().next_state() != NextState::Login {
