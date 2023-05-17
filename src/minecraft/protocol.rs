@@ -18,9 +18,11 @@ pub enum ProtocolError {
     InvalidNextState(i32),
     #[error("Failed to read from stream: {0}")]
     StreamReadError(#[from] std::io::Error),
+    #[error("VarInt too big")]
+    VarIntTooBig,
 }
 
-// this trait is a little goofy looking, but it allows us to implement the same trait for multiple types
+// this trait is a little goofy looking, but it allows me to implement the same trait for multiple types
 // and even recursively for types that contain other types that implement the trait (see `UncompressedMinecraftPacket`)
 #[async_trait]
 pub trait AsyncStreamReadable<T> {
@@ -47,11 +49,13 @@ async fn read_uuid(stream: &mut TcpStream) -> std::io::Result<Uuid> {
 async fn read_unsigned_short(stream: &mut TcpStream) -> std::io::Result<u16> {
     let mut buf = [0u8; 2];
     stream.read_exact(&mut buf).await?;
-    Ok(u16::from_be_bytes(buf))
+    // in my testing, endianness didn't matter, but from my research Minecraft clients
+    // use little-endian for unsigned shorts
+    Ok(u16::from_le_bytes(buf))
 }
 
 /// Reads a `String` from the stream
-async fn read_string(stream: &mut TcpStream) -> std::io::Result<String> {
+async fn read_string(stream: &mut TcpStream) -> Result<String, ProtocolError> {
     let length = read_varint(stream).await?;
     // lengths are guaranteed to be positive, so we can safely cast to usize
     #[allow(clippy::cast_sign_loss)]
@@ -61,7 +65,7 @@ async fn read_string(stream: &mut TcpStream) -> std::io::Result<String> {
 }
 
 /// Reads a `VarInt` from the stream
-async fn read_varint(stream: &mut TcpStream) -> std::io::Result<i32> {
+async fn read_varint(stream: &mut TcpStream) -> Result<i32, ProtocolError> {
     let mut buf = [0u8; 1];
     let mut idx = 0;
     let mut value = 0;
@@ -71,7 +75,7 @@ async fn read_varint(stream: &mut TcpStream) -> std::io::Result<i32> {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
                 "Unexpected EOF",
-            ));
+            ))?;
         }
         let next_byte = buf[0];
         value |= (i32::from(next_byte & SEGMENT_BITS)) << (idx);
@@ -83,10 +87,7 @@ async fn read_varint(stream: &mut TcpStream) -> std::io::Result<i32> {
         idx += 7;
 
         if idx >= 64 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "VarInt too big",
-            ));
+            return Err(ProtocolError::VarIntTooBig);
         }
     }
     Ok(value)
