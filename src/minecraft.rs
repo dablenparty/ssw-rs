@@ -170,10 +170,7 @@ impl MinecraftServer<'_> {
             return Err(crate::config::SswConfigError::MissingMinecraftVersion)?;
         }
         let java_executable = config.java_path();
-        // TODO: check if the java version is valid for the server version
         self.patch_log4shell().await?;
-        let port = self.get_port();
-        info!("Starting Minecraft server on port {port}");
         let min_mem_arg = format!("-Xms{}M", config.min_memory_in_mb());
         let max_mem_arg = format!("-Xmx{}M", config.max_memory_in_mb());
 
@@ -199,6 +196,7 @@ impl MinecraftServer<'_> {
 
         let mut handles = vec![(stdin_handle, proc_stdin_token)];
 
+        let port = self.get_port();
         let restart_duration = Duration::from_secs_f32(*config.restart_after_hrs() * 3600.0);
         let shutdown_duration = Duration::from_secs_f32(*config.shutdown_after_mins() * 60.0);
 

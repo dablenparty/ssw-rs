@@ -57,7 +57,6 @@ pub fn begin_shutdown_task(
                 0 => {
                     if shutdown_handle.is_none() {
                         // start the shutdown
-                        info!("Server is empty, shutting down in {duration_string}.");
                         let sender = server_sender.clone();
                         let child_token = shutdown_token.clone();
                         shutdown_handle = Some(tokio::spawn(async move {
@@ -68,6 +67,7 @@ pub fn begin_shutdown_task(
                                 }
                             }
                         }));
+                        info!("Server is empty, shutting down in {duration_string}.");
                     }
                 }
                 _ => {

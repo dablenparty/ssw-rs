@@ -16,7 +16,7 @@ mod config;
 mod logging;
 mod minecraft;
 
-/// Simple Server Wrapper (SSW) is a simple wrapper for Minecraft servers, allowing for easy
+/// Simple Server Wrapper (SSW) is a server wrapper for Minecraft servers, allowing for easy
 /// automation of some simple server management features.
 #[derive(Debug, Parser)]
 struct CommandLineArgs {
@@ -24,7 +24,7 @@ struct CommandLineArgs {
     #[arg(required = true)]
     server_jar_path: PathBuf,
 
-    /// The log level to use, defaults to info
+    /// The log level to use for the terminal (file will always be debug or trace)
     #[arg(long, short, default_value = "info")]
     log_level: LevelFilter,
 
