@@ -1,124 +1,178 @@
-use std::{path::{Path, PathBuf}, borrow::Cow};
+use std::{
+    borrow::Cow,
+    path::{Path, PathBuf},
+};
 
-use log::info;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use getset::{Getters, MutGetters, Setters};
+use log::warn;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
-use crate::{ssw_error, util::async_create_dir_if_not_exists};
+#[derive(Debug, Error)]
+pub enum SswConfigError {
+    #[error("Failed to parse config: {0}")]
+    ParseError(#[from] toml::de::Error),
+    #[error("Failed to serialize config: {0}")]
+    SerializeError(#[from] toml::ser::Error),
+    #[error("Failed to read config: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("mc_version is not set in config")]
+    MissingMinecraftVersion,
+}
 
-// TODO: auto-restart after crash
-/// The SSW server configuration
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Getters, MutGetters, Setters)]
+#[getset(get = "pub", get_mut = "pub", set = "pub")]
 pub struct SswConfig<'s> {
-    /// How much memory to allocate to the server in gigabytes
-    pub memory_in_gb: f64,
-    /// How long to wait (in hours) before restarting the server
-    pub restart_timeout: f64,
-    /// How long to wait (in minutes) with no players before shutting
-    /// down the server
-    pub shutdown_timeout: f64,
-    /// The port to use for the SSW proxy
-    pub ssw_port: u16,
-    /// The version string for the associated Minecraft server
-    pub mc_version: Option<String>,
-    /// The required Java version string for the associated Minecraft server
-    pub required_java_version: String,
-    /// Extra arguments to pass to the JVM when starting the server
-    pub jvm_args: Cow<'s, Vec<String>>,
-    /// Whether to automatically backup the server on startup
-    pub auto_backup: bool,
-    /// The maximum number of backups to keep
-    pub max_backups: usize,
+    /// Extra JVM arguments to pass to the server
+    extra_jvm_args: Cow<'s, Vec<String>>,
+    /// The minimum amount of memory to allocate to the server in MB
+    min_memory_in_mb: usize,
+    /// The maximum amount of memory to allocate to the server in MB
+    max_memory_in_mb: usize,
+    /// The version of Minecraft to run. This is used to determine how to patch Log4Shell.
+    mc_version: Option<String>,
+    /// The number of hours to wait before restarting the server (set to 0 to disable)
+    restart_after_hrs: f32,
+    /// The number of minutes to wait before shutting down the server (set to 0 to disable)
+    shutdown_after_mins: f32,
+    /// Whether to automatically start the server when it is stopped and the listener receives a connection
+    auto_start: bool,
+    /// The path to the Java executable to use
+    java_path: String,
 }
 
 impl Default for SswConfig<'_> {
     fn default() -> Self {
         Self {
-            memory_in_gb: 1.0,
-            restart_timeout: 12.0,
-            shutdown_timeout: 5.0,
-            ssw_port: 25566,
+            extra_jvm_args: Cow::Owned(vec![
+                "-XX:+UnlockExperimentalVMOptions".into(),
+                "-XX:+UseG1GC".into(),
+                "-XX:G1NewSizePercent=20".into(),
+                "-XX:G1ReservePercent=20".into(),
+                "-XX:MaxGCPauseMillis=50".into(),
+                "-XX:G1HeapRegionSize=32M".into(),
+            ]),
+            min_memory_in_mb: 256,
+            max_memory_in_mb: 1024,
             mc_version: None,
-            required_java_version: "17.0".to_string(),
-            jvm_args: Cow::Owned(vec![]),
-            auto_backup: true,
-            max_backups: 5,
+            restart_after_hrs: 12.0,
+            shutdown_after_mins: 5.0,
+            auto_start: true,
+            java_path: which::which("java").map_or_else(
+                |e| {
+                    warn!("Failed to find java in PATH: {e}");
+                    "java".into()
+                },
+                |p| p.to_string_lossy().into_owned(),
+            ),
         }
+    }
+}
+
+impl TryFrom<PathBuf> for SswConfig<'_> {
+    type Error = SswConfigError;
+
+    fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
+        Self::try_from(path.as_path())
+    }
+}
+
+impl TryFrom<&Path> for SswConfig<'_> {
+    type Error = SswConfigError;
+
+    fn try_from(path: &Path) -> Result<Self, Self::Error> {
+        let config = std::fs::read_to_string(path)?;
+        let config = toml::from_str(&config)?;
+        Ok(config)
     }
 }
 
 impl<'s> SswConfig<'s> {
-    /// Attempt to load a config from the given path
+    /// Saves the config to the given path.
     ///
     /// # Arguments
     ///
-    /// * `config_path` - The path to the config file. If it does not exist, it will be created with default values.
+    /// * `path` - The path to save the config to
     ///
     /// # Errors
     ///
-    /// An error may occur when reading or writing the config file, as well as in the serialization/deserialization process.
+    /// This function will return an error if the config cannot be serialized or
+    /// written to disk.
+    pub async fn save(&self, path: &Path) -> Result<(), SswConfigError> {
+        let toml_string = toml::to_string_pretty(self)?;
+        tokio::fs::write(path, toml_string).await?;
+        Ok(())
+    }
+
+    /// Attempts to load the config from the given path. If the file does not
+    /// exist, a default config is created and saved to the given path. This
+    /// function will also attempt to read the Minecraft version from the
+    /// jar files in the parent folder of the given path.
     ///
-    /// returns: `serde_json::Result<SswConfig>`
-    pub async fn from_path(config_path: &Path) -> ssw_error::Result<SswConfig<'s>> {
-        if config_path.exists() {
-            info!("Found existing SSW config");
-            let config_string = tokio::fs::read_to_string(config_path).await?;
-            toml::from_str(&config_string).map_err(ssw_error::Error::from)
+    /// # Arguments
+    ///
+    /// * `path` - The path to the config file
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the config file cannot be read or
+    /// parsed, or if the Minecraft version cannot be read from the jar files.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the parent folder of the given path does
+    /// not exist.
+    pub async fn load(path: &Path) -> Result<SswConfig<'s>, SswConfigError> {
+        if path.exists() {
+            Self::try_from(path)
         } else {
-            info!(
-                "No SSW config found, creating default config at {}",
-                config_path.display()
-            );
-            let config = Self::default();
-            async_create_dir_if_not_exists(
-                &config_path
-                    .parent()
-                    .map_or_else(|| PathBuf::from("."), Path::to_path_buf),
-            )
-            .await?;
-            let config_string = toml::to_string_pretty(&config)?;
-            tokio::fs::write(config_path, config_string).await?;
+            let mut config = Self::default();
+            let parent = path.parent().unwrap();
+            let mc_version = try_read_version_from_folder(parent).await?;
+            config.set_mc_version(mc_version);
+            config.save(path).await?;
             Ok(config)
         }
     }
-
-    /// Save the config to the given path
-    ///
-    /// # Arguments
-    ///
-    /// * `config_path` - The path to the config file. If it does not exist, it will be created with default values.
-    ///
-    /// # Errors
-    ///
-    /// An error may occur when writing the config file, as well as in the serialization process.
-    pub async fn save(&self, config_path: &Path) -> ssw_error::Result<()> {
-        let config_string = toml::to_string_pretty(&self)?;
-        tokio::fs::write(config_path, config_string)
-            .await
-            .map_err(ssw_error::Error::from)
-    }
 }
 
-/// Converts a JSON config file to a TOML config file, returning the deserialized config for
-/// convenience. This is a temporary function to help with the transition from JSON to TOML.
+/// Tries to read the version string from the given folder.
 ///
-/// ***IMPORTANT**: This function will delete the JSON file after conversion.*
+/// All Minecraft versions `1.14` and later have a `version.json` file in the
+/// server jar file. This function will attempt to read the version string from
+/// that file. If the file is not found, or the version string cannot be read,
+/// `None` is returned.
 ///
-/// # Arguments
-///
-/// * `json_path` - The path to the JSON config file
-///
-/// # Errors
-///
-/// An error may occur when reading or writing the config file, as well as in the serialization/deserialization process.
-pub async fn convert_json_to_toml<T: Serialize + DeserializeOwned>(
-    json_path: &Path,
-) -> ssw_error::Result<T> {
-    let json_string = tokio::fs::read_to_string(json_path).await?;
-    let value: T = serde_json::from_str(&json_string)?;
-    let toml_string = toml::to_string_pretty(&value)?;
-    let toml_path = json_path.with_extension("toml");
-    tokio::fs::write(toml_path.clone(), toml_string).await?;
-    tokio::fs::remove_file(json_path).await?;
-    Ok(value)
+/// This function uses the sync `zip` crate because the `async_zip` crate has
+/// issues with reading some types of zip files.
+pub async fn try_read_version_from_folder(server_folder: &Path) -> std::io::Result<Option<String>> {
+    // get all jar files, ignoring errors (e.g., if a file is not a jar)
+    let jar_files = {
+        let mut dir_reader = tokio::fs::read_dir(server_folder).await?;
+        let mut jar_files = Vec::new();
+        while let Ok(Some(entry)) = dir_reader.next_entry().await {
+            let path = entry.path();
+            if let Some(ext) = path.extension() {
+                if ext == "jar" {
+                    jar_files.push(path);
+                }
+            }
+        }
+        jar_files
+    };
+    for jar in jar_files {
+        let jar_handle = std::fs::File::open(&jar)?;
+        let mut jar_reader = zip::ZipArchive::new(jar_handle)?;
+        match jar_reader.by_name("version.json") {
+            Ok(version_json) => {
+                let parsed: serde_json::Value = serde_json::from_reader(version_json)?;
+                return Ok(parsed["id"].as_str().map(String::from));
+            }
+            Err(e) => {
+                warn!("failed to read version.json from jar file {jar:?}: {e:?}",);
+                continue;
+            }
+        };
+    }
+    Ok(None)
 }

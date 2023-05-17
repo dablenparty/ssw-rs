@@ -1,56 +1,110 @@
-use std::{io, path::PathBuf};
+use std::path::PathBuf;
 
-use getset::Getters;
 use log::debug;
 use serde::Deserialize;
 
-use crate::{ssw_error, util::async_create_dir_if_not_exists};
+pub mod version;
 
-use super::mc_version::MinecraftVersion;
+const MANIFEST_V2_URL: &str = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
 
-const MANIFEST_V2_LINK: &str = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
-
-#[derive(Deserialize, Debug, Clone, Getters)]
-#[get = "pub"]
-pub struct LatestVersions {
-    release: String,
-    snapshot: String,
+#[derive(Debug, thiserror::Error)]
+pub enum VersionManifestError {
+    #[error("Failed to download version manifest: {0}")]
+    DownloadError(#[from] reqwest::Error),
+    #[error("Failed to parse version manifest: {0}")]
+    ParseError(#[from] serde_json::Error),
+    #[error("Failed to read or write version manifest: {0}")]
+    ReadWriteError(#[from] std::io::Error),
+    #[error("Minecraft version not found: {0}")]
+    VersionNotFound(String),
 }
 
-/// The manifest of all Minecraft versions.
+/// The version manifest for the Minecraft launcher.
 ///
-/// This struct is not a complete representation of the manifest, but only the parts that are needed.
-#[derive(Deserialize, Debug, Getters)]
-#[get = "pub"]
+/// This is not a full representation of the version manifest, only the parts
+/// that are relevant to this crate.
+#[derive(Debug, Deserialize)]
 pub struct VersionManifestV2 {
-    /// The complete list of all Minecraft versions.
-    versions: Vec<MinecraftVersion>,
-    latest: LatestVersions,
+    versions: Vec<version::MinecraftVersion>,
 }
 
 impl VersionManifestV2 {
-    /// Loads the launcher manifest from disk.
-    pub async fn load() -> io::Result<Self> {
+    /// Loads the version manifest from the default location specified by
+    /// `get_manifest_location` and parses it into a `VersionManifestV2`.
+    /// This will not download the version manifest if it does not exist,
+    /// use `refresh_launcher_manifest` to do that.
+    pub async fn load() -> Result<VersionManifestV2, VersionManifestError> {
         let manifest_location = get_manifest_location();
-        debug!(
-            "Loading version manifest from {}",
-            manifest_location.display()
-        );
-        let manifest = tokio::fs::read_to_string(manifest_location).await?;
-        let manifest: VersionManifestV2 = serde_json::from_str(&manifest)?; // I could inline this, but ? implicitly converts the error to an io::Error
-        Ok(manifest)
+        let manifest_string = tokio::fs::read_to_string(manifest_location).await?;
+        VersionManifestV2::try_from(manifest_string)
     }
 
-    /// Finds a Minecraft version by its ID, e.g. `1.17.1`, if it exists.
-    pub fn find_version(&self, id: &str) -> Option<&MinecraftVersion> {
-        self.versions.iter().find(|v| v.id == id)
+    /// Downloads the version manifest from Mojang and saves it to the default
+    /// location specified by `get_manifest_location`. This will overwrite any
+    /// existing version manifest, hence the name "refresh".
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the version manifest could not be
+    /// downloaded, parsed, or written to disk.
+    pub async fn refresh_launcher_manifest() -> Result<(), VersionManifestError> {
+        let manifest_location = get_manifest_location();
+        debug!("Downloading version manifest from {MANIFEST_V2_URL}");
+        let manifest_bytes = reqwest::get(MANIFEST_V2_URL)
+            .await?
+            .error_for_status()?
+            .bytes()
+            .await?;
+        debug!(
+            "Writing version manifest to {}",
+            manifest_location.display()
+        );
+        tokio::fs::write(manifest_location, manifest_bytes).await?;
+        Ok(())
+    }
+
+    /// Finds a version by its ID.
+    ///
+    /// This function will perform a linear search through the version manifest
+    /// to find the version with the given ID. If no version is found, an error
+    /// is returned.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The ID of the version to find
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the version cannot be found.
+    pub fn find_by_id(&self, id: &str) -> Result<&version::MinecraftVersion, VersionManifestError> {
+        self.versions
+            .iter()
+            .find(|v| *v.id() == id)
+            .ok_or(VersionManifestError::VersionNotFound(id.to_string()))
+    }
+}
+
+impl TryFrom<&str> for VersionManifestV2 {
+    type Error = VersionManifestError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let manifest = serde_json::from_str::<VersionManifestV2>(value)?;
+        Ok(manifest)
+    }
+}
+
+impl TryFrom<String> for VersionManifestV2 {
+    type Error = VersionManifestError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
     }
 }
 
 /// Gets the location to the launcher manifest.
 ///
 /// - Windows: `%APPDATA%/.minecraft/versions/version_manifest_v2.json`
-/// - Mac:  `~/Library/Application Support/minecraft/versions/version_manifest_v2.json`
+/// - Mac:     `~/Library/Application Support/minecraft/versions/version_manifest_v2.json`
 /// - Linux:   `~/.minecraft/versions/version_manifest_v2.json`
 ///
 /// returns: `PathBuf`
@@ -58,10 +112,10 @@ fn get_manifest_location() -> PathBuf {
     const MANIFEST_NAME: &str = "version_manifest_v2.json";
     #[cfg(windows)]
     let manifest_parent = {
-        let appdata = env!("APPDATA");
+        // if APPDATA isn't set, there's a bigger problem
+        let appdata = std::env::var("APPDATA").expect("APPDATA environment variable not set");
         let mut appdata_path = PathBuf::from(appdata);
         appdata_path.push(".minecraft");
-        appdata_path.push("versions");
         appdata_path
     };
 
@@ -71,7 +125,6 @@ fn get_manifest_location() -> PathBuf {
         home_path.push("Library");
         home_path.push("Application Support");
         home_path.push("minecraft");
-        home_path.push("versions");
         home_path
     };
 
@@ -79,29 +132,8 @@ fn get_manifest_location() -> PathBuf {
     let manifest_parent = {
         let mut home_path = dirs::home_dir().expect("Could not find home directory");
         home_path.push(".minecraft");
-        home_path.push("versions");
         home_path
     };
 
-    manifest_parent.join(MANIFEST_NAME)
-}
-
-/// Refreshes the launcher manifest by downloading the latest version of it from [Mojang](https://launchermeta.mojang.com/mc/game/version_manifest_v2.json).
-///
-/// # Errors
-///
-/// An error will be returned if the manifest fails to download or write.
-pub async fn refresh_manifest() -> ssw_error::Result<()> {
-    debug!(
-        "Downloading Minecraft version manifest from {}",
-        MANIFEST_V2_LINK
-    );
-    let manifest = reqwest::get(MANIFEST_V2_LINK).await?.text().await?;
-    let manifest_location = get_manifest_location();
-    // minecraft might not be installed, so we need to create the directory
-    let manifest_parent = manifest_location.parent().unwrap();
-    async_create_dir_if_not_exists(manifest_parent).await?;
-    debug!("Saving new manifest to {}", manifest_location.display());
-    tokio::fs::write(manifest_location, manifest).await?;
-    Ok(())
+    manifest_parent.join("versions").join(MANIFEST_NAME)
 }
