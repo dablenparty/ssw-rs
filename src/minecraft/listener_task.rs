@@ -1,4 +1,4 @@
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use thiserror::Error;
 use tokio::{
     io::AsyncWriteExt,
@@ -80,20 +80,28 @@ async fn inner_listener(
 /// If you look at older versions of this function, you'll see me complain about how
 /// the Minecraft protocol is a pain to implement yourself. Long story short, I did
 /// it. This function not only determines if the connection is a client connection,
-/// but it also reads the username and UUID of the client.
+/// but it also reads the username and UUID of the client on newer versions of
+/// Minecraft.
 async fn is_client_connection(stream: &mut TcpStream) -> Result<bool, ProtocolError> {
     let packet = UncompressedServerboundPacket::<HandshakePacket>::read(stream).await?;
     if *packet.data().next_state() != NextState::Login {
         return Ok(false);
     }
+    if let Err(e) = read_player_info(stream).await {
+        debug!("Error reading login start packet: {e}");
+        debug!("This is likely caused by an older version of Minecraft");
+    }
+    Ok(true)
+}
+
+async fn read_player_info(stream: &mut TcpStream) -> Result<(), ProtocolError> {
     let login_start_packet =
         UncompressedServerboundPacket::<LoginStartPacket>::read(stream).await?;
     let username = login_start_packet.data().name();
     let uuid = login_start_packet.data().player_uuid();
-    if let Some(uuid) = uuid {
+    Ok(if let Some(uuid) = uuid {
         info!("Found client {username} with UUID {uuid}");
     } else {
         info!("Found client {username}");
-    }
-    Ok(true)
+    })
 }
