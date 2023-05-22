@@ -55,13 +55,15 @@ async fn inner_listener(
     loop {
         let (mut stream, _) = listener.accept().await?;
         // logging every socket connection would spam the debug logs as the pinger task will be connecting every 5 seconds
-        let is_client = is_client_connection(&mut stream).await.unwrap_or_else(|e| {
-            if let ProtocolError::InvalidNextState(_) = e {
-            } else {
-                warn!("Failed to determine if connection is client: {e}");
-            }
-            false
-        });
+        let is_client = is_client_connection(&mut stream)
+            .await
+            .unwrap_or_else(|e| match e {
+                ProtocolError::InvalidNextState(_) => false,
+                _ => {
+                    warn!("Error determining if connection is client: {e}");
+                    false
+                }
+            });
         if let Err(e) = stream.shutdown().await {
             error!("Failed to shutdown stream: {e}");
         }

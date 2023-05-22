@@ -20,6 +20,8 @@ pub enum ProtocolError {
     StreamReadError(#[from] std::io::Error),
     #[error("VarInt too big")]
     VarIntTooBig,
+    #[error("Invalid UTF-8 sent by client: {0}")]
+    InvalidUtf8(#[from] std::string::FromUtf8Error),
 }
 
 // this trait is a little goofy looking, but it allows me to implement the same trait for multiple types
@@ -61,7 +63,7 @@ async fn read_string(stream: &mut TcpStream) -> Result<String, ProtocolError> {
     #[allow(clippy::cast_sign_loss)]
     let mut buf = vec![0u8; length as usize];
     stream.read_exact(&mut buf).await?;
-    Ok(String::from_utf8(buf).expect("Invalid UTF-8 sent by Minecraft client"))
+    Ok(String::from_utf8(buf)?)
 }
 
 /// Reads a `VarInt` from the stream
