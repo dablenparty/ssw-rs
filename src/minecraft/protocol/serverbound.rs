@@ -3,10 +3,7 @@ use getset::Getters;
 use tokio::net::TcpStream;
 use uuid::Uuid;
 
-use super::{
-    read_bool, read_string, read_unsigned_short, read_uuid, read_varint, AsyncStreamReadable,
-    ProtocolError,
-};
+use super::{AsyncMinecraftReadExt, AsyncStreamReadable, ProtocolError};
 
 #[derive(Debug, Getters)]
 pub struct UncompressedServerboundPacket<T>
@@ -28,8 +25,8 @@ where
     where
         T: Sized,
     {
-        let length = read_varint(stream).await?;
-        let packet_id = read_varint(stream).await?;
+        let length = stream.read_varint().await?;
+        let packet_id = stream.read_varint().await?;
         let data = T::read(stream).await?;
 
         Ok(UncompressedServerboundPacket {
@@ -71,10 +68,10 @@ pub struct HandshakePacket {
 #[async_trait]
 impl AsyncStreamReadable<HandshakePacket> for HandshakePacket {
     async fn read(stream: &mut TcpStream) -> Result<HandshakePacket, ProtocolError> {
-        let protocol_version = read_varint(stream).await?;
-        let server_address = read_string(stream).await?;
-        let server_port = read_unsigned_short(stream).await?;
-        let next_state = read_varint(stream).await?.try_into()?;
+        let protocol_version = stream.read_varint().await?;
+        let server_address = stream.read_string().await?;
+        let server_port = stream.read_unsigned_short().await?;
+        let next_state = stream.read_varint().await?.try_into()?;
 
         Ok(HandshakePacket {
             protocol_version,
@@ -97,10 +94,10 @@ pub struct LoginStartPacket {
 #[async_trait]
 impl AsyncStreamReadable<LoginStartPacket> for LoginStartPacket {
     async fn read(stream: &mut TcpStream) -> Result<LoginStartPacket, ProtocolError> {
-        let name = read_string(stream).await?;
-        let has_player_uuid = read_bool(stream).await?;
+        let name = stream.read_string().await?;
+        let has_player_uuid = stream.read_bool().await?;
         let player_uuid = if has_player_uuid {
-            Some(read_uuid(stream).await?)
+            Some(stream.read_uuid().await?)
         } else {
             None
         };
