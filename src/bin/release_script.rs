@@ -10,7 +10,7 @@ fn main() -> io::Result<()> {
     }
     println!("cargo build exited with status: {}", build_status);
     let old_target = format!("target/release/{}{}", PACKAGE_NAME, env::consts::EXE_SUFFIX);
-    let dotless_version = PACKAGE_VERSION.replace(".", "_");
+    let dotless_version = PACKAGE_VERSION.replace('.', "_");
     let new_target = format!(
         "target/release/{}_v{}_{}_{}{}",
         PACKAGE_NAME,
