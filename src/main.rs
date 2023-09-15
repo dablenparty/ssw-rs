@@ -2,37 +2,21 @@
 // the same thing has different names on windows and unix for some reason
 #![allow(clippy::module_name_repetitions)]
 
-use std::path::PathBuf;
-
 use clap::Parser;
-use log::{debug, error, info, warn, LevelFilter};
+use log::{debug, error, info, warn};
 use tokio::{io::AsyncBufReadExt, select, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
 use minecraft::{begin_server_task, ServerTaskRequest};
 
-use crate::{logging::init_logging, minecraft::manifest::VersionManifestV2};
+use crate::{
+    commandline::CommandLineArgs, logging::init_logging, minecraft::manifest::VersionManifestV2,
+};
 
+mod commandline;
 mod config;
 mod logging;
 mod minecraft;
-
-/// Simple Server Wrapper (SSW) is a server wrapper for Minecraft servers, allowing for easy
-/// automation of some simple server management features.
-#[derive(Debug, Parser)]
-struct CommandLineArgs {
-    /// The path to the server jar
-    #[arg(required = true)]
-    server_jar_path: PathBuf,
-
-    /// The log level to use for the terminal (file will always be debug or trace)
-    #[arg(long, short, default_value = "info")]
-    log_level: LevelFilter,
-
-    /// Refresh the version manifest when SSW starts
-    #[arg(long, short)]
-    refresh_manifest: bool,
-}
 
 #[tokio::main]
 async fn main() {
