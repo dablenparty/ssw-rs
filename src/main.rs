@@ -6,9 +6,10 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use log::{debug, error, info, warn, LevelFilter};
-use minecraft::{begin_server_task, ServerTaskRequest};
 use tokio::{io::AsyncBufReadExt, select, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
+
+use minecraft::{begin_server_task, ServerTaskRequest};
 
 use crate::{logging::init_logging, minecraft::manifest::VersionManifestV2};
 

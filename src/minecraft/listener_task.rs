@@ -24,7 +24,7 @@ enum ListenerError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Tokio channel error: {0}")]
-    ChannelError(#[from] tokio::sync::mpsc::error::SendError<ServerTaskRequest>),
+    ChannelError(#[from] mpsc::error::SendError<ServerTaskRequest>),
 }
 
 pub fn begin_listener_task(

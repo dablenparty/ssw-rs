@@ -47,10 +47,11 @@ fn rotate_logs() -> io::Result<PathBuf> {
     if !latest_log.exists() {
         return Ok(latest_log);
     }
-    // get the creation time of the latest log, or use the current time if
-    // we can't get the creation time
+    // get the creation time of the latest log, or the modified time if that fails, or the current
+    // time if that also fails
     let create_time = fs::metadata(&latest_log)?
-        .modified()
+        .created()
+        .or(fs::metadata(&latest_log)?.modified())
         .map_or_else(|_| Local::now(), DateTime::<Local>::from);
     let package_name = env!("CARGO_PKG_NAME");
     let dated_name = create_time

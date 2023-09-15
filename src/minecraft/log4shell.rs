@@ -28,10 +28,12 @@ impl MinecraftServer<'_> {
         let server_version_id = self
             .config
             .mc_version()
-            .clone()
+            .as_ref()
             .ok_or(crate::config::SswConfigError::MissingMinecraftVersion)?;
-        let server_version = manifest.find_by_id(&server_version_id)?;
+        let server_version = manifest.find_by_id(server_version_id)?;
         // there might be a better way to do this than this ugly if/else chain, but I don't know it
+        // since finding the version in the manifest is O(n), I don't want to do it more than
+        // necessary, hence them all being searched in-line
         let (arg, url) = if server_version >= manifest.find_by_id("1.18.1").unwrap() {
             // no patch needed (too new)
             (None, None)

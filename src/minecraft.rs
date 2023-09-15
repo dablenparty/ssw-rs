@@ -32,7 +32,7 @@ mod shutdown_task;
 mod state_task;
 
 fn pipe_stdin(process: &mut Child, token: CancellationToken) -> (JoinHandle<()>, Sender<String>) {
-    let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::channel::<String>(3);
+    let (stdin_tx, mut stdin_rx) = mpsc::channel::<String>(3);
     let mut stdin = process.stdin.take().expect("process stdin is not piped");
     let handle = tokio::spawn(async move {
         loop {
@@ -100,7 +100,8 @@ impl MinecraftServer<'_> {
     /// This is equivalent to calling `get_property("server-port").unwrap_or(25565)`
     /// as `25565` is the default port for Minecraft servers.
     pub fn get_port(&self) -> u16 {
-        self.get_property("server-port").unwrap_or(25565)
+        const DEFAULT_MC_PORT: u16 = 25565;
+        self.get_property("server-port").unwrap_or(DEFAULT_MC_PORT)
     }
 
     /// Convenience method to get the address the server is running on
@@ -125,21 +126,17 @@ impl MinecraftServer<'_> {
     {
         let properties_path = self.jar_path.with_file_name("server.properties");
         std::fs::File::open(properties_path).ok().and_then(|f| {
-            let properties_reader = std::io::BufReader::new(f);
-            PropertiesIter::new(properties_reader)
-                .into_iter()
-                .find_map(|r| {
-                    if let Ok(line) = r {
-                        match line.consume_content() {
-                            java_properties::LineContent::KVPair(k, v) if k == key => {
-                                v.parse().ok()
-                            }
-                            _ => None,
-                        }
-                    } else {
-                        None
+            let properties_reader = io::BufReader::new(f);
+            PropertiesIter::new(properties_reader).find_map(|r| {
+                if let Ok(line) = r {
+                    match line.consume_content() {
+                        java_properties::LineContent::KVPair(k, v) if k == key => v.parse().ok(),
+                        _ => None,
                     }
-                })
+                } else {
+                    None
+                }
+            })
         })
     }
 
@@ -156,8 +153,7 @@ impl MinecraftServer<'_> {
         server_sender: Sender<ServerTaskRequest>,
         status_sender: Sender<ServerState>,
         server_token: CancellationToken,
-    ) -> Result<(JoinHandle<()>, mpsc::Sender<String>), MinecraftServerError> {
-        const DEFAULT_MC_PORT: u16 = 25565;
+    ) -> Result<(JoinHandle<()>, Sender<String>), MinecraftServerError> {
         let config = {
             let config_path = self.jar_path.with_file_name("ssw-config.toml");
             let config = SswConfig::load(&config_path).await?;
@@ -175,12 +171,7 @@ impl MinecraftServer<'_> {
         let max_mem_arg = format!("-Xmx{}M", config.max_memory_in_mb());
 
         let mut process_args = vec![min_mem_arg.as_str(), max_mem_arg.as_str()];
-        process_args.extend(
-            config
-                .extra_jvm_args()
-                .iter()
-                .map(std::string::String::as_str),
-        );
+        process_args.extend(config.extra_jvm_args().iter().map(String::as_str));
         process_args.extend(vec!["-jar", self.jar_path.to_str().unwrap(), "nogui"]);
 
         let wd = self.jar_path.parent().unwrap();
@@ -283,7 +274,7 @@ pub fn begin_server_task(
 ) -> (JoinHandle<()>, Sender<ServerTaskRequest>) {
     // this function is long, but it's mostly due to internal error handling. If something goes wrong, we want to
     // continue running the server task, but we also want to log the error and notify the user.
-    let (server_task_tx, mut server_task_rx) = tokio::sync::mpsc::channel::<ServerTaskRequest>(5);
+    let (server_task_tx, mut server_task_rx) = mpsc::channel::<ServerTaskRequest>(5);
     let inner_tx = server_task_tx.clone();
     let task_handle = tokio::spawn(async move {
         let mut server = MinecraftServer::new(jar_path);
