@@ -20,14 +20,14 @@ where
 impl<T> AsyncStreamReadable<UncompressedServerboundPacket<T>> for UncompressedServerboundPacket<T>
 where
     T: AsyncStreamReadable<T>,
+    T::Error: Into<ProtocolError>,
 {
-    async fn read(stream: &mut TcpStream) -> Result<UncompressedServerboundPacket<T>, ProtocolError>
-    where
-        T: Sized,
-    {
+    type Error = ProtocolError;
+
+    async fn read(stream: &mut TcpStream) -> Result<UncompressedServerboundPacket<T>, Self::Error> {
         let length = stream.read_varint().await?;
         let packet_id = stream.read_varint().await?;
-        let data = T::read(stream).await?;
+        let data = T::read(stream).await.map_err(Into::into)?;
 
         Ok(UncompressedServerboundPacket {
             length,
@@ -67,7 +67,9 @@ pub struct HandshakePacket {
 
 #[async_trait]
 impl AsyncStreamReadable<HandshakePacket> for HandshakePacket {
-    async fn read(stream: &mut TcpStream) -> Result<HandshakePacket, ProtocolError> {
+    type Error = ProtocolError;
+
+    async fn read(stream: &mut TcpStream) -> Result<HandshakePacket, Self::Error> {
         let protocol_version = stream.read_varint().await?;
         let server_address = stream.read_string().await?;
         let server_port = stream.read_unsigned_short().await?;
@@ -86,14 +88,14 @@ impl AsyncStreamReadable<HandshakePacket> for HandshakePacket {
 #[get = "pub"]
 pub struct LoginStartPacket {
     name: String,
-    // thanks to Rust, we don't need this field. it's implicit in the Option
-    // has_player_uuid: bool
     player_uuid: Option<Uuid>,
 }
 
 #[async_trait]
 impl AsyncStreamReadable<LoginStartPacket> for LoginStartPacket {
-    async fn read(stream: &mut TcpStream) -> Result<LoginStartPacket, ProtocolError> {
+    type Error = ProtocolError;
+
+    async fn read(stream: &mut TcpStream) -> Result<LoginStartPacket, Self::Error> {
         let name = stream.read_string().await?;
         let has_player_uuid = stream.read_bool().await?;
         let player_uuid = if has_player_uuid {

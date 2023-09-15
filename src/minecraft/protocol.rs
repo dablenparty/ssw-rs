@@ -24,13 +24,26 @@ pub enum ProtocolError {
     InvalidUtf8(#[from] std::string::FromUtf8Error),
 }
 
-// this trait is a little goofy looking, but it allows me to implement the same trait for multiple types
-// and even recursively for types that contain other types that implement the trait (see `UncompressedMinecraftPacket`)
+/// This trait is a little goofy looking, but it allows me to implement the same trait for multiple types
+/// and even recursively for types that contain other types that implement the trait (see `UncompressedMinecraftPacket`)
 #[async_trait]
-pub trait AsyncStreamReadable<T> {
-    async fn read(stream: &mut TcpStream) -> Result<T, ProtocolError>
+pub trait AsyncStreamReadable<T>: Sized + Send + Sync {
+    /// The error type returned by the `read` function
+    type Error: Sized + Send + Sync;
+
+    /// Reads a packet from the stream and converts it to the given type.
+    /// I'm sure there's a way to do this with generics and an `impl for TcpStream`, but I'm lazy.
+    ///
+    /// # Arguments
+    ///
+    /// * `stream` - The stream to read from
+    ///
+    /// # Errors
+    ///
+    /// If an error occurs while reading from the stream or converting to `T`, it will be returned.
+    async fn read(stream: &mut TcpStream) -> Result<T, Self::Error>
     where
-        T: Sized;
+        T: Sized + Send + Sync;
 }
 
 #[async_trait]
