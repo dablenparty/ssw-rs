@@ -20,7 +20,7 @@ pub fn begin_ping_task(
             // Wait for the next tick or cancellation
             select! {
                 _ = interval.tick() => {}
-                _ = token.cancelled() => {
+                () = token.cancelled() => {
                     break;
                 }
             }
@@ -39,7 +39,7 @@ pub fn begin_ping_task(
                         }
                     }
                 }
-                _ = token.cancelled() => {
+                () = token.cancelled() => {
                     break;
                 }
             }

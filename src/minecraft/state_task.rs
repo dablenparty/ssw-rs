@@ -28,7 +28,7 @@ pub fn begin_state_task(
     let handle = tokio::spawn(async move {
         loop {
             select! {
-                _ = token.cancelled() => {
+                () = token.cancelled() => {
                     debug!("Status task cancelled");
                     break;
                 },

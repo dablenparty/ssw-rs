@@ -34,7 +34,7 @@ pub fn begin_listener_task(
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         select! {
-            _ = token.cancelled() => {
+            () = token.cancelled() => {
                 info!("Listener task cancelled");
             }
             result = inner_listener(server_address, server_sender) => {

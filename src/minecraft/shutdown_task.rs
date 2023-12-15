@@ -24,7 +24,7 @@ pub fn begin_shutdown_task(
             let player_count = select! {
                 r = player_count_watcher.changed() => {
                     match r {
-                        Ok(_) => {
+                        Ok(()) => {
                             *player_count_watcher.borrow_and_update()
                         }
                         Err(e) => {
@@ -33,7 +33,7 @@ pub fn begin_shutdown_task(
                         }
                     }
                 }
-                _ = token.cancelled() => {
+                () = token.cancelled() => {
                     // since the pinger uses a child token, if this one was cancelled, the pinger will be too
                     pinger.await.unwrap_or_else(|e| warn!("Failed to await pinger: {e}"));
                     debug!("Shutdown task cancelled");
@@ -61,8 +61,8 @@ pub fn begin_shutdown_task(
                         let child_token = shutdown_token.clone();
                         shutdown_handle = Some(tokio::spawn(async move {
                             select! {
-                                _ = child_token.cancelled() => {}
-                                _ = tokio::time::sleep(wait_for) => {
+                                () = child_token.cancelled() => {}
+                                () = tokio::time::sleep(wait_for) => {
                                     sender.send(ServerTaskRequest::Stop).await.unwrap_or_else(|e| warn!("Failed to send shutdown request: {e}"));
                                 }
                             }

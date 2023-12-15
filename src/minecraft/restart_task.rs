@@ -30,7 +30,7 @@ pub fn begin_restart_task(
                     _ = ticker.tick() => {
                         time_left -= split_duration;
                     }
-                    _ = token.cancelled() => {
+                    () = token.cancelled() => {
                         debug!("Restart task cancelled");
                         return;
                     }

@@ -61,7 +61,7 @@ fn pipe_stdin(process: &mut Child, token: CancellationToken) -> (JoinHandle<()>,
                         break;
                     }
                 }
-                _ = token.cancelled() => {
+                () = token.cancelled() => {
                     debug!("Process stdin pipe cancelled");
                     break;
                 }
@@ -262,7 +262,7 @@ impl MinecraftServer<'_> {
                         error!("Error waiting for server process: {e}");
                     }
                 }
-                _ = server_token.cancelled() => {
+                () = server_token.cancelled() => {
                     info!("Server task cancelled, killing server process in {}", DurationString::from(WAIT_TO_KILL_DURATION));
                     select! {
                         r = process.wait() => {
@@ -270,7 +270,7 @@ impl MinecraftServer<'_> {
                                 error!("Error waiting for server process: {e}");
                             }
                         }
-                        _ = tokio::time::sleep(WAIT_TO_KILL_DURATION) => {
+                        () = tokio::time::sleep(WAIT_TO_KILL_DURATION) => {
                             if let Err(e) = process.kill().await {
                                 error!("Error killing server process: {e}");
                             }
@@ -352,7 +352,7 @@ pub fn begin_server_task(
                     }
                     continue;
                 }
-                _ = token.cancelled() => {
+                () = token.cancelled() => {
                     debug!("Server message task cancelled");
                     for (id, (handle, child_token)) in handle_map.drain() {
                         child_token.cancel();
