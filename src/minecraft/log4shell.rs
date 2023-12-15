@@ -54,7 +54,7 @@ impl MinecraftServer<'_> {
 
         if let Some(url) = url {
             let file_name = url.split('/').last().unwrap();
-            let log4j_config_path = self.jar_path.with_file_name(file_name);
+            let log4j_config_path = self.launcher.path.with_file_name(file_name);
             if !log4j_config_path.exists() {
                 info!("Downloading Log4Shell patch from {url}");
                 let log4j_config_bytes = reqwest::get(url).await?.bytes().await?;
@@ -69,7 +69,7 @@ impl MinecraftServer<'_> {
             if !config.extra_jvm_args().contains(&arg) {
                 debug!("Added Log4Shell patch to config");
                 config.extra_jvm_args_mut().to_mut().push(arg);
-                let config_path = self.jar_path.with_file_name("ssw-config.toml");
+                let config_path = self.launcher.path.with_file_name("ssw-config.toml");
                 config.save(&config_path).await?;
             }
         } else {

@@ -55,6 +55,8 @@ impl VersionManifestV2 {
             .error_for_status()?
             .bytes()
             .await?;
+        let manifest_parent = manifest_location.parent().unwrap();
+        tokio::fs::create_dir_all(manifest_parent).await?;
         debug!(
             "Writing version manifest to {}",
             manifest_location.display()

@@ -1,4 +1,11 @@
-use std::{collections::HashMap, io, path::PathBuf, process::Stdio, str::FromStr, time::Duration};
+use std::{
+    collections::HashMap,
+    io,
+    path::{Path, PathBuf},
+    process::Stdio,
+    str::FromStr,
+    time::Duration,
+};
 
 use duration_string::DurationString;
 use java_properties::PropertiesIter;
@@ -81,8 +88,64 @@ pub enum MinecraftServerError {
     Log4ShellPatchError(#[from] log4shell::Log4ShellPatchError),
 }
 
+pub enum ServerLauncherType {
+    JarFile,
+    Script,
+}
+
+impl From<&Path> for ServerLauncherType {
+    fn from(path: &Path) -> Self {
+        if path
+            .extension()
+            .is_some_and(|ext| ext.to_ascii_lowercase() == "jar")
+        {
+            ServerLauncherType::JarFile
+        } else {
+            ServerLauncherType::Script
+        }
+    }
+}
+
+pub struct MinecraftServerLauncher {
+    path: PathBuf,
+    ty: ServerLauncherType,
+}
+
+impl MinecraftServerLauncher {
+    pub fn new(path: PathBuf) -> Self {
+        let ty = ServerLauncherType::from(path.as_path());
+        Self { path, ty }
+    }
+
+    fn launch_jar(&self, config: &SswConfig) -> Result<Child, MinecraftServerError> {
+        let java_executable = config.java_path();
+        let min_mem_arg = format!("-Xms{}M", config.min_memory_in_mb());
+        let max_mem_arg = format!("-Xmx{}M", config.max_memory_in_mb());
+
+        let mut process_args = vec![min_mem_arg.as_str(), max_mem_arg.as_str()];
+        process_args.extend(config.extra_jvm_args().iter().map(String::as_str));
+        process_args.extend(vec!["-jar", self.path.to_str().unwrap(), "nogui"]);
+
+        let working_dir = self.path.parent().unwrap();
+        debug!("Starting process with args: {process_args:?}");
+        let process = Command::new(java_executable)
+            .current_dir(working_dir)
+            .args(process_args)
+            .stdin(Stdio::piped())
+            .spawn()?;
+        Ok(process)
+    }
+
+    pub fn launch(&self, config: &SswConfig) -> Result<Child, MinecraftServerError> {
+        match self.ty {
+            ServerLauncherType::JarFile => self.launch_jar(config),
+            ServerLauncherType::Script => todo!(),
+        }
+    }
+}
+
 pub struct MinecraftServer<'m> {
-    jar_path: PathBuf,
+    launcher: MinecraftServerLauncher,
     config: SswConfig<'m>,
 }
 
@@ -91,7 +154,7 @@ impl MinecraftServer<'_> {
         let jar_path = dunce::canonicalize(&jar_path).unwrap_or(jar_path);
         let config_path = jar_path.with_file_name("ssw-config.toml");
         Self {
-            jar_path,
+            launcher: MinecraftServerLauncher::new(jar_path),
             config: SswConfig::try_from(config_path).unwrap_or_default(),
         }
     }
@@ -124,7 +187,7 @@ impl MinecraftServer<'_> {
     where
         T: FromStr,
     {
-        let properties_path = self.jar_path.with_file_name("server.properties");
+        let properties_path = self.launcher.path.with_file_name("server.properties");
         std::fs::File::open(properties_path).ok().and_then(|f| {
             let properties_reader = io::BufReader::new(f);
             PropertiesIter::new(properties_reader).find_map(|r| {
@@ -154,33 +217,16 @@ impl MinecraftServer<'_> {
         status_sender: Sender<ServerState>,
         server_token: CancellationToken,
     ) -> Result<(JoinHandle<()>, Sender<String>), MinecraftServerError> {
-        let config = {
-            let config_path = self.jar_path.with_file_name("ssw-config.toml");
+        // reload the config in case it was changed
+        {
+            let config_path = self.launcher.path.with_file_name("ssw-config.toml");
             let config = SswConfig::load(&config_path).await?;
-            self.config = config.clone();
-            config
+            self.config = config;
         };
-        debug!("Loaded config: {config:#?}");
-        if config.mc_version().is_none() {
-            error!("The Minecraft version is not set in the config");
-            return Err(crate::config::SswConfigError::MissingMinecraftVersion)?;
-        }
-        let java_executable = config.java_path();
         self.patch_log4shell().await?;
-        let min_mem_arg = format!("-Xms{}M", config.min_memory_in_mb());
-        let max_mem_arg = format!("-Xmx{}M", config.max_memory_in_mb());
-
-        let mut process_args = vec![min_mem_arg.as_str(), max_mem_arg.as_str()];
-        process_args.extend(config.extra_jvm_args().iter().map(String::as_str));
-        process_args.extend(vec!["-jar", self.jar_path.to_str().unwrap(), "nogui"]);
-
-        let wd = self.jar_path.parent().unwrap();
-        debug!("Starting process with args: {process_args:?}");
-        let mut process = Command::new(java_executable)
-            .current_dir(wd)
-            .args(process_args)
-            .stdin(Stdio::piped())
-            .spawn()?;
+        let config = &self.config;
+        debug!("Loaded config: {config:#?}");
+        let mut process = self.launcher.launch(config)?;
         status_sender.send(ServerState::On).await?;
         let proc_stdin_token = CancellationToken::new();
         let (stdin_handle, stdin_sender) = pipe_stdin(&mut process, proc_stdin_token.child_token());
