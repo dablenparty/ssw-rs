@@ -1,3 +1,6 @@
+#[cfg(all(feature = "v2", feature = "v3"))]
+compile_error!("Cannot enable both v2 and v3 features at the same time");
+
 #[cfg(feature = "v2")]
 #[tokio::main]
 async fn main() {

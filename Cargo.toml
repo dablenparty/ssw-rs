@@ -6,9 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ssw = { version = "2.0.1", path = "./v2", optional = true }
+ssw_v2 = { version = "2.0.1", path = "./v2", optional = true }
+# TODO: bring V3 into the main package
+ssw_v3 = { version = "3.0.0", path = "./v3", optional = true }
 tokio = { version = "1", features = ["full"] }
 
 [features]
-default = []
-v2 = ["ssw"]
+default = ["v3"]
+v2 = ["ssw_v2"]
+v3 = ["ssw_v3"]

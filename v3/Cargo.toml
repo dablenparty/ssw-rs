@@ -1,0 +1,13 @@
+[package]
+name = "ssw_v3"
+version = "3.3.3"
+edition = "2021"
+
+[lib]
+name = "ssw_v3"
+path = "src/lib.rs"
+test = false
+bench = false
+doctest = false
+
+[dependencies]
