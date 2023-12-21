@@ -11,3 +11,4 @@ bench = false
 doctest = false
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }

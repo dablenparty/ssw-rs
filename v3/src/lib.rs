@@ -1,14 +1,10 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
-}
+use clap::Parser;
+use cmd::CommandLineArgs;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+mod cmd;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+pub fn v3_main() {
+    let args = CommandLineArgs::parse();
+    #[cfg(debug_assertions)]
+    println!("Parsed args: {args:?}");
 }
