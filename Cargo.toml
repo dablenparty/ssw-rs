@@ -13,5 +13,8 @@ tokio = { version = "1", features = ["full"] }
 
 [features]
 default = ["v3"]
+# this feature is used during development to allow rust-analyzer to work
+# with all the code in the workspace
+dev = ["v2", "v3"]
 v2 = ["ssw_v2"]
 v3 = ["ssw_v3"]
